@@ -51,11 +51,11 @@ export function TributeGrid({
         {districts.map(({ district, tributes: members }) => (
           <section
             key={district}
-            className="district-block"
+            className="district-block tributes-district"
             style={districtAccentStyle(district)}
           >
             <h3 className="district-heading">District {district}</h3>
-            <div className="tribute-grid">
+            <div className="tribute-grid tributes-pair">
               {members.map((tribute) => (
                 <TributeCard
                   key={tribute.id}

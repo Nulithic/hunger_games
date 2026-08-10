@@ -36,7 +36,7 @@ async function handleImageSearch(
 
   const limitRaw = Number(url.searchParams.get('limit') ?? DEFAULT_IMAGE_LIMIT)
   const limit = Number.isFinite(limitRaw)
-    ? Math.min(Math.max(Math.trunc(limitRaw), 1), 10)
+    ? Math.min(Math.max(Math.trunc(limitRaw), 1), 20)
     : DEFAULT_IMAGE_LIMIT
 
   try {

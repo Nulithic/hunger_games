@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../lib/settings'
@@ -33,6 +33,15 @@ const game: GameState = {
       alive: false,
       kills: 1,
     },
+    {
+      id: 'c',
+      name: 'Lin',
+      district: 2,
+      imageUrl: null,
+      imageSource: 'avatar',
+      alive: false,
+      kills: 0,
+    },
   ],
   log: [],
 }
@@ -46,9 +55,26 @@ describe('VictorScreen', () => {
     expect(screen.getByRole('heading', { name: 'Victor' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Ada' })).toBeInTheDocument()
     expect(screen.getByText(/survived 3 days/i)).toBeInTheDocument()
-    expect(screen.getByText(/Bloodbath board:/i)).toHaveTextContent(/Ada \(2\)/)
 
     await user.click(screen.getByRole('button', { name: /run again/i }))
     expect(onReset).toHaveBeenCalled()
+  })
+
+  it('lists every tribute in a kill count table below the victor', () => {
+    render(<VictorScreen game={game} winner={winner} onReset={vi.fn()} />)
+
+    const table = screen.getByRole('table', { name: /kill count/i })
+    const rows = within(table).getAllByRole('row')
+    // header + 3 tributes
+    expect(rows).toHaveLength(4)
+
+    expect(within(table).getByText('Ada')).toBeInTheDocument()
+    expect(within(table).getByText('Grace')).toBeInTheDocument()
+    expect(within(table).getByText('Lin')).toBeInTheDocument()
+
+    const bodyText = table.textContent ?? ''
+    // Sorted by kills descending: Ada (2), Grace (1), Lin (0)
+    expect(bodyText.indexOf('Ada')).toBeLessThan(bodyText.indexOf('Grace'))
+    expect(bodyText.indexOf('Grace')).toBeLessThan(bodyText.indexOf('Lin'))
   })
 })

@@ -21,8 +21,9 @@ describe('searchPortraitCandidates', () => {
     vi.restoreAllMocks()
   })
 
-  it('returns web image choices from the local search api', async () => {
+  it('fetches the top 20 web results and returns loadable choices', async () => {
     stubImagesAlwaysLoad()
+    vi.spyOn(Math, 'random').mockReturnValue(0.99)
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -37,13 +38,40 @@ describe('searchPortraitCandidates', () => {
     )
 
     const result = await searchPortraitCandidates('Katniss Everdeen')
-    expect(result).toEqual([
-      { url: 'https://example.com/one.jpg', source: 'web', label: 'One' },
-      { url: 'https://example.com/two.jpg', source: 'web', label: 'Two' },
-    ])
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/image-search?q=Katniss%20Everdeen&limit=15',
+    expect(result).toEqual(
+      expect.arrayContaining([
+        { url: 'https://example.com/one.jpg', source: 'web', label: 'One' },
+        { url: 'https://example.com/two.jpg', source: 'web', label: 'Two' },
+      ]),
     )
+    expect(result).toHaveLength(2)
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/image-search?q=Katniss%20Everdeen&limit=20',
+    )
+  })
+
+  it('shuffles top hits so re-search can surface different choices', async () => {
+    stubImagesAlwaysLoad()
+    const urls = Array.from({ length: 8 }, (_, i) => ({
+      url: `https://example.com/${i}.jpg`,
+      label: `Image ${i}`,
+    }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ results: urls }),
+      }),
+    )
+
+    vi.spyOn(Math, 'random').mockReturnValue(0.99)
+    const first = await searchPortraitCandidates('Katniss')
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const second = await searchPortraitCandidates('Katniss')
+
+    expect(first).toHaveLength(5)
+    expect(second).toHaveLength(5)
+    expect(first.map((item) => item.url)).not.toEqual(second.map((item) => item.url))
   })
 
   it('falls back to wikipedia when web search misses', async () => {

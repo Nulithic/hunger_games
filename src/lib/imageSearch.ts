@@ -1,9 +1,10 @@
 import type { ImageCandidate } from '../types'
 import { filterLoadableUrls } from './imageLoad'
+import { shuffle } from './rng'
 
 export const IMAGE_CANDIDATE_LIMIT = 5
-/** Ask the API for extras so we can drop hotlink-blocked URLs. */
-const IMAGE_SEARCH_FETCH_LIMIT = 15
+/** Top search hits to pull before shuffling a display set. */
+export const IMAGE_SEARCH_FETCH_LIMIT = 20
 
 type WikiPage = {
   title?: string
@@ -48,12 +49,14 @@ async function searchWebImages(name: string): Promise<ImageCandidate[]> {
       })
     }
 
+    // Re-search reshuffles the top hits so the picker shows a fresh set.
+    const shuffled = shuffle(raw, Math.random)
     const loadable = await filterLoadableUrls(
-      raw.map((item) => item.url),
+      shuffled.map((item) => item.url),
       IMAGE_CANDIDATE_LIMIT,
     )
     const allowed = new Set(loadable)
-    return raw.filter((item) => allowed.has(item.url)).slice(0, IMAGE_CANDIDATE_LIMIT)
+    return shuffled.filter((item) => allowed.has(item.url)).slice(0, IMAGE_CANDIDATE_LIMIT)
   } catch {
     return []
   }

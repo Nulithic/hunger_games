@@ -16,7 +16,7 @@ type DdgImagesResponse = {
   results?: DdgImageResult[]
 }
 
-export const DEFAULT_IMAGE_LIMIT = 5
+export const DEFAULT_IMAGE_LIMIT = 20
 
 function extractVqd(html: string): string | null {
   const patterns = [

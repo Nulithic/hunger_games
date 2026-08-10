@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Arena } from './components/Arena'
 import { SetupForm } from './components/SetupForm'
 import { TributeGrid } from './components/TributeGrid'
@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, type GameSettings } from './lib/settings'
 import { advancePhase, createGame } from './lib/simulation'
 import type { GameState, ImageCandidate, Tribute } from './types'
 
-type Screen = 'setup' | 'tributes' | 'arena'
+type Screen = 'setup' | 'tributes' | 'arena' | 'victor'
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('setup')
@@ -90,6 +90,12 @@ export default function App() {
     setGame((prev) => (prev ? advancePhase(prev) : prev))
   }, [])
 
+  useEffect(() => {
+    if (game?.status === 'finished') {
+      setScreen('victor')
+    }
+  }, [game?.status])
+
   function handleReset() {
     setGame(null)
     setScreen('setup')
@@ -129,15 +135,15 @@ export default function App() {
           />
         ) : null}
 
-        {screen === 'arena' && game && game.status !== 'finished' ? (
+        {screen === 'arena' && game ? (
           <Arena game={game} onAdvance={handleAdvance} onReset={handleReset} />
         ) : null}
 
-        {screen === 'arena' && game && game.status === 'finished' && winner ? (
+        {screen === 'victor' && game && winner ? (
           <VictorScreen game={game} winner={winner} onReset={handleReset} />
         ) : null}
 
-        {screen === 'arena' && game && game.status === 'finished' && !winner ? (
+        {screen === 'victor' && game && !winner ? (
           <section className="panel">
             <p className="lede">Something went wrong crowning a victor.</p>
             <button type="button" className="btn primary" onClick={handleReset}>

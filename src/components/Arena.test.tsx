@@ -69,10 +69,37 @@ describe('Arena', () => {
     expect(container.querySelector('.feed-separator')).toBeTruthy()
     expect(screen.getAllByText('Ada').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Grace').length).toBeGreaterThan(0)
+    expect(container.querySelectorAll('.feed-face').length).toBeGreaterThan(0)
+    expect(container.querySelector('.feed-face-frame .fallen-mark')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /show tributes/i }))
     expect(container.querySelector('.tribute-card.is-fallen')).toBeTruthy()
     expect(container.querySelector('.fallen-mark')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: /resolve night 1/i }))
+    await user.click(screen.getByRole('button', { name: /crown the victor/i }))
     expect(onAdvance).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts with tributes hidden and toggles from the event log edge', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <Arena game={baseGame} onAdvance={vi.fn()} onReset={vi.fn()} />,
+    )
+
+    const toggle = screen.getByRole('button', { name: /show tributes/i })
+    expect(screen.queryByRole('heading', { name: /^tributes$/i })).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelector('.arena-shell.is-roster-hidden')).toBeTruthy()
+
+    await user.click(toggle)
+    expect(screen.getByRole('heading', { name: /^tributes$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /hide tributes/i })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(container.querySelector('.arena-shell.is-roster-hidden')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /hide tributes/i }))
+    expect(screen.queryByRole('heading', { name: /^tributes$/i })).not.toBeInTheDocument()
   })
 })

@@ -6,9 +6,11 @@ import {
   CORNUCOPIA_LOOT,
   CORNUCOPIA_RUSH,
   FEAST_TEMPLATES,
+  FINALE_SEQUENCES,
   templatesForPhase,
   type EventTemplate,
   type KillTemplate,
+  type SoloTemplate,
 } from './eventTemplates'
 import { createRng, pickOne, shuffle } from './rng'
 import { DEFAULT_SETTINGS, normalizeSettings, targetKillsForPhase } from './settings'
@@ -91,7 +93,7 @@ function maybeFinish(game: GameState): GameState {
     id: eventId(game.day, game.phase, game.log.length, game.seed),
     day: game.day,
     phase: game.phase,
-    text: `The cannons fall silent. ${winner.name} from District ${winner.district} is the Victor of the Hunger Games!`,
+    text: `${winner.name} from District ${winner.district} wins the Hunger Games.`,
     kind: 'victory',
     actorIds: [winner.id],
     victimIds: [],
@@ -109,6 +111,10 @@ function nextPhaseState(day: number, phase: Phase): { day: number; phase: Phase 
   if (phase === 'cornucopia') return { day: 1, phase: 'day' }
   if (phase === 'day') return { day, phase: 'night' }
   return { day: day + 1, phase: 'day' }
+}
+
+function isSoloTemplate(template: EventTemplate): template is SoloTemplate {
+  return template.needs === 1
 }
 
 function applyTemplate(
@@ -144,12 +150,12 @@ function applyTemplate(
     return tributes
   }
 
-  if (template.needs === 1 && pool.length >= 1) {
-    const solo = pool[0]!
+  if (isSoloTemplate(template) && pool.length >= 1) {
+    const actors = pool
     pushEvent(events, day, phase, seed, {
-      text: template.text(solo.name),
+      text: template.text(actors.map((tribute) => tribute.name)),
       kind: template.kind,
-      actorIds: [solo.id],
+      actorIds: actors.map((tribute) => tribute.id),
       victimIds: [],
     })
   }
@@ -157,27 +163,25 @@ function applyTemplate(
   return tributes
 }
 
-function forceElimination(
-  tributes: Tribute[],
-  events: GameEvent[],
-  day: number,
-  phase: Phase,
-  seed: number,
-  rng: () => number,
-  text: (actor: string, victim: string) => string,
-): Tribute[] {
-  const alive = tributes.filter((t) => t.alive)
-  if (alive.length < 2) return tributes
-  const ordered = shuffle(alive, rng)
-  const actor = ordered[0]!
-  const victim = ordered[1]!
-  pushEvent(events, day, phase, seed, {
-    text: text(actor.name, victim.name),
-    kind: 'kill',
-    actorIds: [actor.id],
-    victimIds: [victim.id],
-  })
-  return applyKill(tributes, actor.id, victim.id)
+function markBusy(busy: Set<string>, tributes: readonly Tribute[]): void {
+  for (const tribute of tributes) busy.add(tribute.id)
+}
+
+function availableAlive(tributes: readonly Tribute[], busy: ReadonlySet<string>): Tribute[] {
+  return tributes.filter((tribute) => tribute.alive && !busy.has(tribute.id))
+}
+
+/**
+ * How many deaths a phase may take.
+ * Non-finale phases always leave at least two living so the final duel is its own beat.
+ * Finale phases (already two living) may take the last kill.
+ */
+function maxKillsForPhase(aliveCount: number, desiredKills: number, finale: boolean): number {
+  const floor = finale ? 1 : 2
+  return Math.min(
+    Math.max(0, desiredKills),
+    Math.max(0, aliveCount - floor),
+  )
 }
 
 function applyKillQuota(
@@ -189,17 +193,17 @@ function applyKillQuota(
   rng: () => number,
   killTemplates: KillTemplate[],
   desiredKills: number,
+  busy: Set<string> = new Set(),
+  options: { finale?: boolean } = {},
 ): Tribute[] {
   let next = tributes
-  const maxKills = Math.min(
-    Math.max(0, desiredKills),
-    Math.max(0, next.filter((t) => t.alive).length - 1),
-  )
+  const aliveCount = next.filter((t) => t.alive).length
+  const maxKills = maxKillsForPhase(aliveCount, desiredKills, options.finale === true)
 
   for (let i = 0; i < maxKills; i += 1) {
-    const alive = next.filter((t) => t.alive)
-    if (alive.length <= 1) break
-    const pool = shuffle(alive, rng)
+    const pool = shuffle(availableAlive(next, busy), rng)
+    if (pool.length < 2) break
+    const pair = pool.slice(0, 2)
     next = applyTemplate(
       next,
       events,
@@ -207,11 +211,74 @@ function applyKillQuota(
       phase,
       seed,
       pickOne(killTemplates, rng),
-      pool,
+      pair,
     )
+    // Only the fallen is spent — killers can strike again so presets can hit their quota.
+    markBusy(busy, pair.slice(1))
   }
 
   return next
+}
+
+function resolveFinale(
+  game: GameState,
+  tributes: Tribute[],
+  events: GameEvent[],
+  rng: () => number,
+): PhaseResult {
+  const { day, phase } = game
+  const living = tributes.filter((t) => t.alive)
+  if (living.length !== 2) {
+    return { tributes, events }
+  }
+
+  const ordered = shuffle(living, rng)
+  const winner = ordered[0]!
+  const loser = ordered[1]!
+  const sequence = pickOne(FINALE_SEQUENCES, rng)
+
+  // Display order for the opening — keep names shuffled so the victor isn't telegraphed.
+  const intro = shuffle([winner, loser], rng)
+  pushEvent(events, day, phase, game.seed, {
+    text: sequence.opening(intro[0]!.name, intro[1]!.name),
+    kind: 'opening',
+    actorIds: intro.map((t) => t.id),
+    victimIds: [],
+  })
+
+  for (const beat of sequence.beats) {
+    const actors =
+      beat.focus === 'both'
+        ? [winner, loser]
+        : beat.focus === 'winner'
+          ? [winner]
+          : [loser]
+    pushEvent(events, day, phase, game.seed, {
+      text: beat.text(winner.name, loser.name),
+      kind: beat.kind,
+      actorIds: actors.map((t) => t.id),
+      victimIds: [],
+    })
+  }
+
+  pushEvent(events, day, phase, game.seed, {
+    text: sequence.kill(winner.name, loser.name),
+    kind: 'kill',
+    actorIds: [winner.id],
+    victimIds: [loser.id],
+  })
+
+  pushEvent(events, day, phase, game.seed, {
+    text: sequence.aftermath(winner.name, loser.name),
+    kind: 'opening',
+    actorIds: [winner.id],
+    victimIds: [],
+  })
+
+  return {
+    tributes: applyKill(tributes, winner.id, loser.id),
+    events,
+  }
 }
 
 function resolveCornucopia(game: GameState, rng: () => number): PhaseResult {
@@ -224,28 +291,53 @@ function resolveCornucopia(game: GameState, rng: () => number): PhaseResult {
   const rushChance = settings.cornucopiaRushPercent / 100
 
   pushEvent(events, day, phase, game.seed, {
-    text: `The gong sounds. ${roster.length} tributes explode off their plates toward the Cornucopia — backpacks, blades, and blood waiting in the dust.`,
+    text: `The gong sounds. ${roster.length} tributes leave the plates.`,
     kind: 'opening',
     actorIds: roster.map((t) => t.id),
     victimIds: [],
   })
 
+  const rushers: Tribute[] = []
+  const hesitators: Tribute[] = []
+  const fleers: Tribute[] = []
   for (const tribute of roster) {
     const roll = rng()
-    const template =
-      roll < rushChance
-        ? pickOne(CORNUCOPIA_RUSH, rng)
-        : roll < rushChance + (1 - rushChance) * 0.5
-          ? pickOne(CORNUCOPIA_HESITATE, rng)
-          : pickOne(CORNUCOPIA_FLEE, rng)
+    if (roll < rushChance) rushers.push(tribute)
+    else if (roll < rushChance + (1 - rushChance) * 0.5) hesitators.push(tribute)
+    else fleers.push(tribute)
+  }
+
+  if (rushers.length > 0) {
     tributes = applyTemplate(
       tributes,
       events,
       day,
       phase,
       game.seed,
-      template,
-      [tribute],
+      pickOne(CORNUCOPIA_RUSH, rng),
+      rushers,
+    )
+  }
+  if (hesitators.length > 0) {
+    tributes = applyTemplate(
+      tributes,
+      events,
+      day,
+      phase,
+      game.seed,
+      pickOne(CORNUCOPIA_HESITATE, rng),
+      hesitators,
+    )
+  }
+  if (fleers.length > 0) {
+    tributes = applyTemplate(
+      tributes,
+      events,
+      day,
+      phase,
+      game.seed,
+      pickOne(CORNUCOPIA_FLEE, rng),
+      fleers,
     )
   }
 
@@ -258,6 +350,8 @@ function resolveCornucopia(game: GameState, rng: () => number): PhaseResult {
     rng,
     CORNUCOPIA_KILLS,
     settings.cornucopiaKills,
+    new Set(),
+    { finale: false },
   )
 
   const survivors = shuffle(
@@ -265,17 +359,22 @@ function resolveCornucopia(game: GameState, rng: () => number): PhaseResult {
     rng,
   )
   const lootCount = Math.min(survivors.length, 2 + Math.floor(rng() * 2))
+  const lootGroups = new Map<(typeof CORNUCOPIA_LOOT)[number], Tribute[]>()
   for (let i = 0; i < lootCount; i += 1) {
     const survivor = survivors[i]
     if (!survivor) break
+    const template = pickOne(CORNUCOPIA_LOOT, rng)
+    lootGroups.set(template, [...(lootGroups.get(template) ?? []), survivor])
+  }
+  for (const [template, group] of lootGroups) {
     tributes = applyTemplate(
       tributes,
       events,
       day,
       phase,
       game.seed,
-      pickOne(CORNUCOPIA_LOOT, rng),
-      [survivor],
+      template,
+      group,
     )
   }
 
@@ -284,8 +383,8 @@ function resolveCornucopia(game: GameState, rng: () => number): PhaseResult {
   pushEvent(events, day, phase, game.seed, {
     text:
       fallen === 0
-        ? `Against the odds, no cannons fire in the opening scramble. ${remaining} tributes scatter into the arena as the Cornucopia falls quiet.`
-        : `The bloodbath ends. ${fallen} tribute${fallen === 1 ? '' : 's'} down. ${remaining} still breathe as the arena swallows them.`,
+        ? `No cannons in the opening. ${remaining} tributes head into the arena.`
+        : `Bloodbath over. ${fallen} down, ${remaining} left.`,
     kind: 'opening',
     actorIds: tributes.filter((t) => t.alive).map((t) => t.id),
     victimIds: [],
@@ -298,17 +397,24 @@ function resolveStandardPhase(game: GameState, rng: () => number): PhaseResult {
   const { day, phase, settings } = game
   let tributes = cloneTributes(game.tributes)
   const events: GameEvent[] = []
+  /** Flavor/feast participants — kills use their own pool so presets can still cull. */
+  const busy = new Set<string>()
   const templates = templatesForPhase(phase)
   const killTemplates = templates.filter((t): t is KillTemplate => t.kind === 'kill')
   const nonKillTemplates = templates.filter((t) => t.kind !== 'kill')
   const livingCount = livingTributes(game).length
   const targetKills = targetKillsForPhase(settings, day)
 
+  // Final two get their own broadcast beat — never bury the duel in a normal day/night.
+  if (livingCount === 2) {
+    return resolveFinale(game, tributes, events, rng)
+  }
+
   pushEvent(events, day, phase, game.seed, {
     text:
       phase === 'day'
-        ? `Day ${day} breaks over the arena. Smoke drifts from last night's fights; ${livingCount} tributes are still unmarked by a final cannon.`
-        : `Night ${day} settles in. The anthem waits overhead while ${livingCount} tributes try to survive until morning.`,
+        ? `Day ${day}. ${livingCount} tributes still alive.`
+        : `Night ${day}. ${livingCount} tributes still alive.`,
     kind: 'opening',
     actorIds: livingTributes(game).map((t) => t.id),
     victimIds: [],
@@ -316,21 +422,26 @@ function resolveStandardPhase(game: GameState, rng: () => number): PhaseResult {
 
   const includeFeast = phase === 'day' && day >= 3 && livingCount >= 4 && rng() < 0.35
   if (includeFeast) {
-    const feastPool = shuffle(
-      tributes.filter((t) => t.alive),
-      rng,
-    )
-    tributes = applyTemplate(
-      tributes,
-      events,
-      day,
-      phase,
-      game.seed,
-      pickOne(FEAST_TEMPLATES, rng),
-      feastPool,
-    )
+    const feastPool = shuffle(availableAlive(tributes, busy), rng)
+    const feastTemplate = pickOne(FEAST_TEMPLATES, rng)
+    const participants =
+      feastTemplate.needs === 2 ? feastPool.slice(0, 2) : feastPool.slice(0, 1)
+    if (participants.length >= feastTemplate.needs) {
+      tributes = applyTemplate(
+        tributes,
+        events,
+        day,
+        phase,
+        game.seed,
+        feastTemplate,
+        participants,
+      )
+      markBusy(busy, participants)
+    }
   }
 
+  // Kill quota is independent of flavor busy so early/late death presets can land.
+  // Floor of 2 living — the last cannon waits for the finale phase.
   tributes = applyKillQuota(
     tributes,
     events,
@@ -340,51 +451,71 @@ function resolveStandardPhase(game: GameState, rng: () => number): PhaseResult {
     rng,
     killTemplates,
     targetKills,
+    new Set(),
+    { finale: false },
   )
-
-  const flavorCount = Math.min(
-    3 + Math.floor(rng() * 3),
-    Math.max(1, tributes.filter((t) => t.alive).length),
-  )
-
-  for (let i = 0; i < flavorCount; i += 1) {
-    const alive = tributes.filter((t) => t.alive)
-    if (alive.length === 0) break
-    const template = pickOne(nonKillTemplates, rng)
-    const pool = shuffle(alive, rng)
-    tributes = applyTemplate(
-      tributes,
-      events,
-      day,
-      phase,
-      game.seed,
-      template,
-      pool,
-    )
+  for (const event of events) {
+    if (event.kind !== 'kill') continue
+    for (const id of event.victimIds) busy.add(id)
   }
 
-  const stillAlive = tributes.filter((t) => t.alive)
-  if (stillAlive.length === 2 && !events.some((e) => e.kind === 'kill')) {
-    tributes = forceElimination(
-      tributes,
-      events,
-      day,
-      phase,
-      game.seed,
-      rng,
-      (actor, victim) =>
-        `Only two remain. In a final clash among the ruins, ${actor} defeats ${victim} and waits for the hovercraft.`,
+  if (tributes.filter((t) => t.alive).length >= 2) {
+    const flavorCount = Math.min(
+      3 + Math.floor(rng() * 3),
+      Math.max(0, availableAlive(tributes, busy).length),
     )
+
+    const soloGroups = new Map<EventTemplate, Tribute[]>()
+    for (let i = 0; i < flavorCount; i += 1) {
+      const pool = shuffle(availableAlive(tributes, busy), rng)
+      if (pool.length === 0) break
+      const template = pickOne(nonKillTemplates, rng)
+      if (template.needs === 2) {
+        if (pool.length < 2) continue
+        const pair = pool.slice(0, 2)
+        tributes = applyTemplate(
+          tributes,
+          events,
+          day,
+          phase,
+          game.seed,
+          template,
+          pair,
+        )
+        markBusy(busy, pair)
+        continue
+      }
+
+      const actor = pool[0]
+      if (!actor) continue
+      soloGroups.set(template, [...(soloGroups.get(template) ?? []), actor])
+      markBusy(busy, [actor])
+    }
+    for (const [template, group] of soloGroups) {
+      tributes = applyTemplate(
+        tributes,
+        events,
+        day,
+        phase,
+        game.seed,
+        template,
+        group,
+      )
+    }
   }
 
   const left = tributes.filter((t) => t.alive).length
   if (left > 1) {
     pushEvent(events, day, phase, game.seed, {
       text:
-        phase === 'day'
-          ? `As the light softens, ${left} tributes are still alive. Night is coming.`
-          : `Dawn threatens the horizon. ${left} tributes made it through Night ${day}.`,
-      kind: 'flavor',
+        left === 2
+          ? phase === 'day'
+            ? `Two left as night comes on.`
+            : `Two make it through Night ${day}. The finale waits.`
+          : phase === 'day'
+            ? `${left} left as night comes on.`
+            : `${left} make it through Night ${day}.`,
+      kind: 'opening',
       actorIds: tributes.filter((t) => t.alive).map((t) => t.id),
       victimIds: [],
     })
@@ -409,12 +540,14 @@ function resolvePhase(game: GameState): GameState {
     log: [...game.log, ...result.events],
   }
 
-  const finished = maybeFinish(resolved)
-  if (finished.status === 'finished') return finished
+  // Leave crowning for the next click so the final kill stays visible in the log.
+  if (livingTributes(resolved).length <= 1) {
+    return resolved
+  }
 
   const upcoming = nextPhaseState(game.day, game.phase)
   return {
-    ...finished,
+    ...resolved,
     day: upcoming.day,
     phase: upcoming.phase,
   }
@@ -423,6 +556,9 @@ function resolvePhase(game: GameState): GameState {
 /** Resolve the current cornucopia, day, or night phase. Manual only — one phase per call. */
 export function advancePhase(game: GameState): GameState {
   if (game.status === 'finished') return game
+  if (livingTributes(game).length === 1) {
+    return maybeFinish(game)
+  }
   return resolvePhase(game)
 }
 
@@ -437,7 +573,12 @@ export function phaseLabel(day: number, phase: Phase): string {
 }
 
 export function advanceActionLabel(game: GameState): string {
+  if (game.status === 'finished') return 'Games complete'
+  if (livingTributes(game).length === 1) return 'Crown the Victor'
   if (game.phase === 'cornucopia') return 'Begin the Cornucopia'
+  if (livingTributes(game).length === 2) {
+    return `Resolve the Finale (${phaseLabel(game.day, game.phase)})`
+  }
   return `Resolve ${phaseLabel(game.day, game.phase)}`
 }
 
