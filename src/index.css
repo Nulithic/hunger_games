@@ -937,11 +937,18 @@ textarea::-webkit-scrollbar-corner {
 
 .feed-section-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.15rem 0.1rem 0.35rem;
   border-bottom: 1px solid rgba(231, 225, 212, 0.12);
+}
+
+.feed-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .feed-section-title {
@@ -958,6 +965,12 @@ textarea::-webkit-scrollbar-corner {
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.feed-narrate {
+  flex-shrink: 0;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
 }
 
 .feed-section-events {
@@ -1045,6 +1058,27 @@ textarea::-webkit-scrollbar-corner {
 .feed-line.kind-opening {
   border-left-color: var(--ember-hot);
   font-weight: 500;
+}
+
+.feed-line.kind-opening .feed-faces {
+  max-width: none;
+  gap: 0.3rem;
+  align-content: start;
+}
+
+.feed-line.kind-opening .feed-face-card {
+  width: 32px;
+  gap: 0;
+}
+
+.feed-line.kind-opening .feed-face-frame {
+  width: 32px;
+  height: 32px;
+}
+
+.feed-line.kind-opening .feed-face-frame .fallen-mark::before,
+.feed-line.kind-opening .feed-face-frame .fallen-mark::after {
+  height: 0.12rem;
 }
 
 .feed-line.phase-night {

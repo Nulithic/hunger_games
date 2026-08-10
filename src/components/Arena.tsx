@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { districtAccentStyle, groupTributesByDistrict } from '../lib/districts'
-import { groupEventsByPhase } from '../lib/eventLog'
+import { groupEventsByPhase, type EventLogSection } from '../lib/eventLog'
+import {
+  createEventNarrator,
+  type EventNarrator,
+} from '../lib/narration'
 import {
   advanceActionLabel,
   livingTributes,
@@ -14,19 +18,37 @@ type ArenaProps = {
   game: GameState
   onAdvance: () => void
   onReset: () => void
+  /** Optional seam for tests. */
+  narrator?: EventNarrator
 }
 
-export function Arena({ game, onAdvance, onReset }: ArenaProps) {
+export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   const feedRef = useRef<HTMLDivElement>(null)
   const latestSectionRef = useRef<HTMLDivElement>(null)
   const advanceLockRef = useRef(false)
+  const narratorRef = useRef<EventNarrator>(narrator ?? createEventNarrator())
   const [showTributes, setShowTributes] = useState(false)
+  const [playingKey, setPlayingKey] = useState<string | null>(null)
+  const [paused, setPaused] = useState(false)
   const alive = livingTributes(game)
   const fallen = game.tributes.filter((t) => !t.alive)
   const districts = groupTributesByDistrict(game.tributes)
   const sections = groupEventsByPhase(game.log)
   const latestKey =
     sections.length > 0 ? sections[sections.length - 1]!.key : null
+
+  useEffect(() => {
+    if (narrator) narratorRef.current = narrator
+  }, [narrator])
+
+  useEffect(() => {
+    const active = narratorRef.current
+    // Per-phase buttons opt in; keep the engine ready to speak on click.
+    active.setMuted(false)
+    return () => {
+      active.stop()
+    }
+  }, [])
 
   function handleAdvanceClick() {
     if (advanceLockRef.current || game.status === 'finished') return
@@ -35,6 +57,32 @@ export function Arena({ game, onAdvance, onReset }: ArenaProps) {
     window.setTimeout(() => {
       advanceLockRef.current = false
     }, 400)
+  }
+
+  function handleNarrateSection(section: EventLogSection) {
+    const texts = section.events.map((event) => event.text)
+    if (texts.length === 0) return
+
+    setPlayingKey(section.key)
+    setPaused(false)
+    narratorRef.current.setMuted(false)
+    narratorRef.current.speakAll(texts, {
+      onComplete: () => {
+        setPlayingKey((current) => (current === section.key ? null : current))
+        setPaused(false)
+      },
+    })
+  }
+
+  function handleTogglePause(sectionKey: string) {
+    if (playingKey !== sectionKey) return
+    if (paused) {
+      narratorRef.current.resume()
+      setPaused(false)
+      return
+    }
+    narratorRef.current.pause()
+    setPaused(true)
   }
 
   useEffect(() => {
@@ -91,6 +139,7 @@ export function Arena({ game, onAdvance, onReset }: ArenaProps) {
               ) : (
                 sections.map((section, index) => {
                   const isLatest = section.key === latestKey
+                  const isPlaying = playingKey === section.key
                   return (
                     <div key={section.key} className="feed-section-wrap">
                       {index > 0 ? <div className="feed-separator" role="separator" /> : null}
@@ -99,8 +148,33 @@ export function Arena({ game, onAdvance, onReset }: ArenaProps) {
                         className={`feed-section phase-${section.phase}${isLatest ? ' is-latest' : ''}`}
                       >
                         <header className="feed-section-head">
-                          <h4 className="feed-section-title">{section.title}</h4>
-                          <span className="feed-section-tag">{section.tag}</span>
+                          <div className="feed-section-heading">
+                            <h4 className="feed-section-title">{section.title}</h4>
+                            <span className="feed-section-tag">{section.tag}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn ghost feed-narrate"
+                            onClick={() =>
+                              isPlaying
+                                ? handleTogglePause(section.key)
+                                : handleNarrateSection(section)
+                            }
+                            aria-pressed={isPlaying ? !paused : false}
+                            title={
+                              isPlaying
+                                ? paused
+                                  ? `Resume narration for ${section.title}`
+                                  : `Pause narration for ${section.title}`
+                                : `Narrate ${section.title}`
+                            }
+                          >
+                            {isPlaying
+                              ? paused
+                                ? 'Unpause'
+                                : 'Pause'
+                              : 'Narrate'}
+                          </button>
                         </header>
                         <div className="feed-section-events">
                           {section.events.map((event) => (

@@ -13,6 +13,8 @@ type EventLogLineProps = {
 export function EventLogLine({ event, tributes, isNew = false }: EventLogLineProps) {
   const faces = tributesForEvent(event, tributes);
   const victimIds = new Set(event.victimIds);
+  const isPhaseOpen = event.kind === "opening";
+  const faceSize = isPhaseOpen ? 32 : 144;
 
   return (
     <div className={`feed-line kind-${event.kind} phase-${event.phase}${isNew ? " is-new" : ""}`}>
@@ -28,15 +30,17 @@ export function EventLogLine({ event, tributes, isNew = false }: EventLogLinePro
                     className="feed-face"
                     src={portraitUrl(tribute.imageUrl, tribute.name)}
                     alt=""
-                    width={144}
-                    height={144}
+                    width={faceSize}
+                    height={faceSize}
                     referrerPolicy="no-referrer"
                   />
                   {dimmed ? <span className="fallen-mark" aria-hidden="true" /> : null}
                 </div>
-                <figcaption className="feed-face-name" style={{ color: accent }}>
-                  {tribute.name}
-                </figcaption>
+                {!isPhaseOpen ? (
+                  <figcaption className="feed-face-name" style={{ color: accent }}>
+                    {tribute.name}
+                  </figcaption>
+                ) : null}
               </figure>
             );
           })}

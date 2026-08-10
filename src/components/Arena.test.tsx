@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { createEventNarrator, type NarrationBackend } from '../lib/narration'
 import { DEFAULT_SETTINGS } from '../lib/settings'
 import type { GameState } from '../types'
 import { Arena } from './Arena'
@@ -101,5 +102,48 @@ describe('Arena', () => {
 
     await user.click(screen.getByRole('button', { name: /hide tributes/i }))
     expect(screen.queryByRole('heading', { name: /^tributes$/i })).not.toBeInTheDocument()
+  })
+
+  it('narrates a phase only when its Narrate button is clicked', async () => {
+    const user = userEvent.setup()
+    const spoken: string[] = []
+    const handlers: Array<{ onend: () => void }> = []
+    const backend: NarrationBackend = {
+      cancel: vi.fn(() => {
+        handlers.length = 0
+      }),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      speak: (text, next) => {
+        spoken.push(text)
+        handlers.push(next)
+      },
+    }
+    const narrator = createEventNarrator(backend)
+    render(
+      <Arena
+        game={baseGame}
+        onAdvance={vi.fn()}
+        onReset={vi.fn()}
+        narrator={narrator}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /enable narration/i })).not.toBeInTheDocument()
+    expect(spoken).toEqual([])
+
+    await user.click(screen.getByTitle(/narrate day 1/i))
+    expect(spoken).toEqual(['Ada ends Grace before dusk.'])
+    expect(screen.getByTitle(/pause narration for day 1/i)).toBeInTheDocument()
+
+    await user.click(screen.getByTitle(/pause narration for day 1/i))
+    expect(screen.getByTitle(/resume narration for day 1/i)).toBeInTheDocument()
+    await user.click(screen.getByTitle(/resume narration for day 1/i))
+    expect(screen.getByTitle(/pause narration for day 1/i)).toBeInTheDocument()
+
+    handlers.shift()?.onend()
+    await waitFor(() => {
+      expect(screen.getByTitle(/narrate day 1/i)).toBeInTheDocument()
+    })
   })
 })
