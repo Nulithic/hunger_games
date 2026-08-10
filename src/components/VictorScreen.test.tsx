@@ -22,6 +22,7 @@ const game: GameState = {
   status: 'finished',
   winnerId: 'a',
   settings: DEFAULT_SETTINGS,
+  finale: null,
   tributes: [
     winner,
     {

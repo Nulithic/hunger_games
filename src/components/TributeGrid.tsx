@@ -41,9 +41,6 @@ export function TributeGrid({
           <button type="button" className="btn ghost" onClick={onBack}>
             Edit names
           </button>
-          <button type="button" className="btn primary" onClick={onBegin} disabled={stillLoading}>
-            {stillLoading ? 'Fetching faces…' : 'Begin the Games'}
-          </button>
         </div>
       </header>
 
@@ -70,6 +67,12 @@ export function TributeGrid({
             </div>
           </section>
         ))}
+      </div>
+
+      <div className="tributes-footer">
+        <button type="button" className="btn primary" onClick={onBegin} disabled={stillLoading}>
+          {stillLoading ? 'Fetching faces…' : 'Begin the Games'}
+        </button>
       </div>
     </section>
   )

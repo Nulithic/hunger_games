@@ -434,6 +434,12 @@ textarea:focus {
   width: 100%;
 }
 
+.tributes-footer {
+  margin-top: 1.75rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .tributes .district-heading {
   font-size: clamp(2rem, 4vw, 2.6rem);
 }
@@ -988,6 +994,7 @@ textarea::-webkit-scrollbar-corner {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.65rem;
   align-items: start;
+  min-width: 0;
   animation: tick 0.45s ease both;
 }
 
@@ -1058,10 +1065,12 @@ textarea::-webkit-scrollbar-corner {
 .feed-line.kind-opening {
   border-left-color: var(--ember-hot);
   font-weight: 500;
+  /* Faces above text so large rosters can't crush/overflow the copy. */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .feed-line.kind-opening .feed-faces {
-  max-width: none;
+  max-width: 100%;
   gap: 0.3rem;
   align-content: start;
 }
@@ -1069,6 +1078,10 @@ textarea::-webkit-scrollbar-corner {
 .feed-line.kind-opening .feed-face-card {
   width: 32px;
   gap: 0;
+}
+
+.feed-line.kind-opening .feed-line-text {
+  overflow-wrap: anywhere;
 }
 
 .feed-line.kind-opening .feed-face-frame {

@@ -1,10 +1,69 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { createEventNarrator, type NarrationBackend } from '../lib/narration'
 import { DEFAULT_SETTINGS } from '../lib/settings'
+import { advancePhase, createGame, livingTributes } from '../lib/simulation'
+import { createTributesFromNames } from '../lib/names'
 import type { GameState } from '../types'
 import { Arena } from './Arena'
+
+function mockNarrationBackend() {
+  const spoken: string[] = []
+  const handlers: Array<{ onend: () => void }> = []
+  const backend: NarrationBackend = {
+    cancel: vi.fn(() => {
+      handlers.length = 0
+    }),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    speak: (text, next) => {
+      spoken.push(text)
+      handlers.push(next)
+    },
+  }
+  return { spoken, handlers, backend }
+}
+
+function FinaleArena({
+  initial,
+  narrator,
+}: {
+  initial: GameState
+  narrator: ReturnType<typeof createEventNarrator>
+}) {
+  const [game, setGame] = useState(initial)
+  return (
+    <Arena
+      game={game}
+      onAdvance={() => setGame((prev) => advancePhase(prev))}
+      onReset={vi.fn()}
+      narrator={narrator}
+    />
+  )
+}
+
+function gameAtFinaleOpening(): GameState {
+  const tributes = createTributesFromNames(
+    ['A', 'B', 'C', 'D'],
+    (() => {
+      let n = 0
+      return () => `id-${n++}`
+    })(),
+  )
+  let game = createGame(tributes, 5, {
+    cornucopiaKills: 2,
+    earlyPhaseKills: 0,
+    latePhaseKills: 0,
+    earlyDays: 2,
+  })
+  game = advancePhase(game)
+  expect(livingTributes(game)).toHaveLength(2)
+  game = advancePhase(game) // begin finale — opening only
+  expect(game.finale).not.toBeNull()
+  return game
+}
 
 const baseGame: GameState = {
   day: 1,
@@ -13,6 +72,7 @@ const baseGame: GameState = {
   status: 'running',
   winnerId: null,
   settings: DEFAULT_SETTINGS,
+  finale: null,
   tributes: [
     {
       id: 'a',
@@ -106,19 +166,7 @@ describe('Arena', () => {
 
   it('narrates a phase only when its Narrate button is clicked', async () => {
     const user = userEvent.setup()
-    const spoken: string[] = []
-    const handlers: Array<{ onend: () => void }> = []
-    const backend: NarrationBackend = {
-      cancel: vi.fn(() => {
-        handlers.length = 0
-      }),
-      pause: vi.fn(),
-      resume: vi.fn(),
-      speak: (text, next) => {
-        spoken.push(text)
-        handlers.push(next)
-      },
-    }
+    const { spoken, handlers, backend } = mockNarrationBackend()
     const narrator = createEventNarrator(backend)
     render(
       <Arena
@@ -144,6 +192,36 @@ describe('Arena', () => {
     handlers.shift()?.onend()
     await waitFor(() => {
       expect(screen.getByTitle(/narrate day 1/i)).toBeInTheDocument()
+    })
+  })
+
+  it('auto-advances finale beats while narrating the latest section', async () => {
+    const user = userEvent.setup()
+    const { spoken, handlers, backend } = mockNarrationBackend()
+    const narrator = createEventNarrator(backend)
+    const initial = gameAtFinaleOpening()
+    const openingText = initial.log[initial.log.length - 1]!.text
+
+    render(<FinaleArena initial={initial} narrator={narrator} />)
+
+    const narrateButtons = screen.getAllByRole('button', { name: /^narrate$/i })
+    await user.click(narrateButtons[narrateButtons.length - 1]!)
+
+    expect(spoken).toEqual([openingText])
+    expect(screen.getByRole('button', { name: /continue finale/i })).toBeInTheDocument()
+
+    handlers.shift()?.onend()
+
+    await waitFor(() => {
+      expect(spoken.length).toBe(2)
+    })
+    expect(spoken[1]).not.toBe(openingText)
+    expect(screen.getByRole('button', { name: /continue finale/i })).toBeInTheDocument()
+
+    handlers.shift()?.onend()
+
+    await waitFor(() => {
+      expect(spoken.length).toBe(3)
     })
   })
 })

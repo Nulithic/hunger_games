@@ -1,4 +1,11 @@
-import type { GameEvent, GameSettings, GameState, Phase, Tribute } from '../types'
+import type {
+  FinaleProgress,
+  GameEvent,
+  GameSettings,
+  GameState,
+  Phase,
+  Tribute,
+} from '../types'
 import {
   CORNUCOPIA_FLEE,
   CORNUCOPIA_HESITATE,
@@ -50,6 +57,7 @@ export function createGame(
     winnerId: null,
     seed,
     settings: normalizeSettings(settings),
+    finale: null,
   }
 }
 
@@ -220,33 +228,74 @@ function applyKillQuota(
   return next
 }
 
-function resolveFinale(
-  game: GameState,
-  tributes: Tribute[],
-  events: GameEvent[],
-  rng: () => number,
-): PhaseResult {
-  const { day, phase } = game
-  const living = tributes.filter((t) => t.alive)
-  if (living.length !== 2) {
-    return { tributes, events }
-  }
+function finaleTotalSteps(sequenceIndex: number): number {
+  const sequence = FINALE_SEQUENCES[sequenceIndex]
+  if (!sequence) return 0
+  // opening + beats + kill + aftermath
+  return 2 + sequence.beats.length + 1
+}
+
+function beginFinaleProgress(game: GameState, rng: () => number): FinaleProgress | null {
+  const living = livingTributes(game)
+  if (living.length !== 2) return null
 
   const ordered = shuffle(living, rng)
   const winner = ordered[0]!
   const loser = ordered[1]!
-  const sequence = pickOne(FINALE_SEQUENCES, rng)
-
-  // Display order for the opening — keep names shuffled so the victor isn't telegraphed.
+  const sequenceIndex = Math.floor(rng() * FINALE_SEQUENCES.length)
   const intro = shuffle([winner, loser], rng)
-  pushEvent(events, day, phase, game.seed, {
-    text: sequence.opening(intro[0]!.name, intro[1]!.name),
-    kind: 'opening',
-    actorIds: intro.map((t) => t.id),
-    victimIds: [],
-  })
 
-  for (const beat of sequence.beats) {
+  return {
+    sequenceIndex,
+    step: 0,
+    winnerId: winner.id,
+    loserId: loser.id,
+    introIds: [intro[0]!.id, intro[1]!.id],
+  }
+}
+
+/** Reveal one finale beat per click so the outcome is not spoiled up front. */
+function advanceFinale(game: GameState): GameState {
+  const phaseKey =
+    game.phase === 'cornucopia' ? 0 : game.phase === 'day' ? 1 : 2
+  const rng = createRng(game.seed + game.day * 9973 + phaseKey * 131 + 19)
+
+  const finale = game.finale ?? beginFinaleProgress(game, rng)
+  if (!finale) return game
+
+  const sequence = FINALE_SEQUENCES[finale.sequenceIndex]
+  if (!sequence) {
+    return { ...game, finale: null }
+  }
+
+  const byId = new Map(game.tributes.map((tribute) => [tribute.id, tribute]))
+  const winner = byId.get(finale.winnerId)
+  const loser = byId.get(finale.loserId)
+  if (!winner || !loser) {
+    return { ...game, finale: null }
+  }
+
+  const events: GameEvent[] = []
+  let tributes = cloneTributes(game.tributes)
+  const { day, phase } = game
+  const beatCount = sequence.beats.length
+  const step = finale.step
+
+  if (step === 0) {
+    const intro = finale.introIds
+      .map((id) => byId.get(id))
+      .filter((tribute): tribute is Tribute => tribute != null)
+    pushEvent(events, day, phase, game.seed, {
+      text: sequence.opening(
+        intro[0]?.name ?? winner.name,
+        intro[1]?.name ?? loser.name,
+      ),
+      kind: 'opening',
+      actorIds: intro.map((tribute) => tribute.id),
+      victimIds: [],
+    })
+  } else if (step <= beatCount) {
+    const beat = sequence.beats[step - 1]!
     const actors =
       beat.focus === 'both'
         ? [winner, loser]
@@ -256,28 +305,34 @@ function resolveFinale(
     pushEvent(events, day, phase, game.seed, {
       text: beat.text(winner.name, loser.name),
       kind: beat.kind,
-      actorIds: actors.map((t) => t.id),
+      actorIds: actors.map((tribute) => tribute.id),
+      victimIds: [],
+    })
+  } else if (step === beatCount + 1) {
+    pushEvent(events, day, phase, game.seed, {
+      text: sequence.kill(winner.name, loser.name),
+      kind: 'kill',
+      actorIds: [winner.id],
+      victimIds: [loser.id],
+    })
+    tributes = applyKill(tributes, winner.id, loser.id)
+  } else {
+    pushEvent(events, day, phase, game.seed, {
+      text: sequence.aftermath(winner.name, loser.name),
+      kind: 'opening',
+      actorIds: [winner.id],
       victimIds: [],
     })
   }
 
-  pushEvent(events, day, phase, game.seed, {
-    text: sequence.kill(winner.name, loser.name),
-    kind: 'kill',
-    actorIds: [winner.id],
-    victimIds: [loser.id],
-  })
-
-  pushEvent(events, day, phase, game.seed, {
-    text: sequence.aftermath(winner.name, loser.name),
-    kind: 'opening',
-    actorIds: [winner.id],
-    victimIds: [],
-  })
+  const nextStep = step + 1
+  const done = nextStep >= finaleTotalSteps(finale.sequenceIndex)
 
   return {
-    tributes: applyKill(tributes, winner.id, loser.id),
-    events,
+    ...game,
+    tributes,
+    log: [...game.log, ...events],
+    finale: done ? null : { ...finale, step: nextStep },
   }
 }
 
@@ -404,11 +459,6 @@ function resolveStandardPhase(game: GameState, rng: () => number): PhaseResult {
   const nonKillTemplates = templates.filter((t) => t.kind !== 'kill')
   const livingCount = livingTributes(game).length
   const targetKills = targetKillsForPhase(settings, day)
-
-  // Final two get their own broadcast beat — never bury the duel in a normal day/night.
-  if (livingCount === 2) {
-    return resolveFinale(game, tributes, events, rng)
-  }
 
   pushEvent(events, day, phase, game.seed, {
     text:
@@ -556,6 +606,10 @@ function resolvePhase(game: GameState): GameState {
 /** Resolve the current cornucopia, day, or night phase. Manual only — one phase per call. */
 export function advancePhase(game: GameState): GameState {
   if (game.status === 'finished') return game
+  // Finale is click-per-event; keep going until aftermath even after the last kill.
+  if (game.finale != null || livingTributes(game).length === 2) {
+    return advanceFinale(game)
+  }
   if (livingTributes(game).length === 1) {
     return maybeFinish(game)
   }
@@ -574,11 +628,14 @@ export function phaseLabel(day: number, phase: Phase): string {
 
 export function advanceActionLabel(game: GameState): string {
   if (game.status === 'finished') return 'Games complete'
+  if (game.finale != null) {
+    const total = finaleTotalSteps(game.finale.sequenceIndex)
+    const next = Math.min(game.finale.step + 1, total)
+    return `Continue Finale (${next}/${total})`
+  }
   if (livingTributes(game).length === 1) return 'Crown the Victor'
   if (game.phase === 'cornucopia') return 'Begin the Cornucopia'
-  if (livingTributes(game).length === 2) {
-    return `Resolve the Finale (${phaseLabel(game.day, game.phase)})`
-  }
+  if (livingTributes(game).length === 2) return 'Begin the Finale'
   return `Resolve ${phaseLabel(game.day, game.phase)}`
 }
 

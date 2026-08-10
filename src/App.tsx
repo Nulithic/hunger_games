@@ -37,6 +37,16 @@ export default function App() {
 
     const candidates = await searchPortraitCandidates(tribute.name)
     setCandidatesById((prev) => ({ ...prev, [tribute.id]: candidates }))
+    const first = candidates[0]
+    if (first) {
+      setTributes((prev) =>
+        prev.map((t) =>
+          t.id === tribute.id
+            ? { ...t, imageUrl: first.url, imageSource: first.source }
+            : t,
+        ),
+      )
+    }
     setLoadingIds((prev) => {
       const next = new Set(prev)
       next.delete(tribute.id)

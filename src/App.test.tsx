@@ -50,8 +50,11 @@ describe('App', () => {
       expect(screen.getByRole('button', { name: /begin the games/i })).toBeEnabled()
     })
 
-    const choice = await screen.findAllByRole('option', { name: /choice 2/i })
-    await user.click(choice[0]!)
-    expect(choice[0]).toHaveAttribute('aria-selected', 'true')
+    const firstChoices = await screen.findAllByRole('option', { name: /choice 1/i })
+    expect(firstChoices[0]).toHaveAttribute('aria-selected', 'true')
+
+    const secondChoices = await screen.findAllByRole('option', { name: /choice 2/i })
+    await user.click(secondChoices[0]!)
+    expect(secondChoices[0]).toHaveAttribute('aria-selected', 'true')
   })
 })

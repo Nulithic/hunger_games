@@ -27,6 +27,12 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   const latestSectionRef = useRef<HTMLDivElement>(null)
   const advanceLockRef = useRef(false)
   const narratorRef = useRef<EventNarrator>(narrator ?? createEventNarrator())
+  const gameRef = useRef(game)
+  const onAdvanceRef = useRef(onAdvance)
+  /** While true, finishing a spoken line advances the next finale beat. */
+  const finaleAutoplayRef = useRef(false)
+  /** Speak only log entries at/after this index after an auto-advance. */
+  const speakFromRef = useRef(0)
   const [showTributes, setShowTributes] = useState(false)
   const [playingKey, setPlayingKey] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
@@ -37,6 +43,9 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   const latestKey =
     sections.length > 0 ? sections[sections.length - 1]!.key : null
 
+  gameRef.current = game
+  onAdvanceRef.current = onAdvance
+
   useEffect(() => {
     if (narrator) narratorRef.current = narrator
   }, [narrator])
@@ -46,12 +55,58 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     // Per-phase buttons opt in; keep the engine ready to speak on click.
     active.setMuted(false)
     return () => {
+      finaleAutoplayRef.current = false
       active.stop()
     }
   }, [])
 
+  function stopFinaleAutoplay() {
+    finaleAutoplayRef.current = false
+  }
+
+  function clearPlaying(sectionKey: string) {
+    setPlayingKey((current) => (current === sectionKey ? null : current))
+    setPaused(false)
+  }
+
+  function shouldContinueFinaleAutoplay(state: GameState): boolean {
+    // Stop once the aftermath is on the log (finale progress clears).
+    return state.status !== 'finished' && state.finale != null
+  }
+
+  function speakSectionTexts(sectionKey: string, texts: string[]) {
+    const lines = texts.map((text) => text.trim()).filter((text) => text.length > 0)
+    if (lines.length === 0) return
+
+    setPlayingKey(sectionKey)
+    setPaused(false)
+    narratorRef.current.setMuted(false)
+    narratorRef.current.speakAll(lines, {
+      onComplete: () => {
+        if (!finaleAutoplayRef.current) {
+          clearPlaying(sectionKey)
+          return
+        }
+
+        const state = gameRef.current
+        if (!shouldContinueFinaleAutoplay(state)) {
+          stopFinaleAutoplay()
+          clearPlaying(sectionKey)
+          return
+        }
+
+        speakFromRef.current = state.log.length
+        onAdvanceRef.current()
+      },
+    })
+  }
+
   function handleAdvanceClick() {
     if (advanceLockRef.current || game.status === 'finished') return
+    stopFinaleAutoplay()
+    narratorRef.current.stop()
+    setPlayingKey(null)
+    setPaused(false)
     advanceLockRef.current = true
     onAdvance()
     window.setTimeout(() => {
@@ -60,18 +115,19 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   }
 
   function handleNarrateSection(section: EventLogSection) {
-    const texts = section.events.map((event) => event.text)
-    if (texts.length === 0) return
+    const isLatest = section.key === latestKey
+    const autoplay = isLatest && game.finale != null
+    finaleAutoplayRef.current = autoplay
 
-    setPlayingKey(section.key)
-    setPaused(false)
-    narratorRef.current.setMuted(false)
-    narratorRef.current.speakAll(texts, {
-      onComplete: () => {
-        setPlayingKey((current) => (current === section.key ? null : current))
-        setPaused(false)
-      },
-    })
+    // Finale shares the phase section — speak only revealed finale beats, not the whole night.
+    const texts =
+      autoplay && game.finale != null
+        ? section.events.slice(-game.finale.step).map((event) => event.text)
+        : section.events.map((event) => event.text)
+
+    if (texts.length === 0) return
+    speakFromRef.current = game.log.length
+    speakSectionTexts(section.key, texts)
   }
 
   function handleTogglePause(sectionKey: string) {
@@ -85,25 +141,58 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     setPaused(true)
   }
 
+  // After finale autoplay advances, narrate the newly revealed beat(s).
+  useEffect(() => {
+    if (!finaleAutoplayRef.current) return
+    if (paused) return
+
+    const from = speakFromRef.current
+    const fresh = game.log.slice(from).map((event) => event.text)
+    if (fresh.length === 0) {
+      if (!shouldContinueFinaleAutoplay(game)) {
+        stopFinaleAutoplay()
+        setPlayingKey(null)
+        setPaused(false)
+      }
+      return
+    }
+
+    speakFromRef.current = game.log.length
+    const sectionKey = latestKey ?? `${game.day}-${game.phase}`
+    speakSectionTexts(sectionKey, fresh)
+    // speakSectionTexts closes over the latest autoplay/narrator refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only from log/finale progress
+  }, [game.log.length, game.finale, game.status, paused, latestKey])
+
+  const previousLatestKeyRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (!latestKey) return
     const feed = feedRef.current
     const section = latestSectionRef.current
     if (!feed || !section || typeof feed.scrollTo !== 'function') return
 
-    const scrollToPhaseTop = () => {
+    // New phase → jump to section top. Finale beats (same section) → follow the new line.
+    const sameSection = previousLatestKeyRef.current === latestKey
+    previousLatestKeyRef.current = latestKey
+    const followEvent = sameSection || game.finale != null
+
+    const scrollIntoView = () => {
+      const target = followEvent
+        ? (section.querySelector('.feed-line:last-child') ?? section)
+        : section
       const feedRect = feed.getBoundingClientRect()
-      const sectionRect = section.getBoundingClientRect()
-      const top = feed.scrollTop + (sectionRect.top - feedRect.top)
+      const targetRect = target.getBoundingClientRect()
+      const top = feed.scrollTop + (targetRect.top - feedRect.top)
       feed.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
     }
 
-    // Wait for the new section (and portraits) to lay out before measuring.
+    // Wait for the new section/event (and portraits) to lay out before measuring.
     const frame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(scrollToPhaseTop)
+      window.requestAnimationFrame(scrollIntoView)
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [latestKey, game.log.length])
+  }, [latestKey, game.log.length, game.finale])
 
   const waitingLabel = phaseLabel(game.day, game.phase)
   const lastResolved =

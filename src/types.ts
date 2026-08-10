@@ -30,6 +30,16 @@ export type GameEvent = {
 
 export type GameStatus = 'setup' | 'tributes' | 'running' | 'finished'
 
+/** In-progress finale revealed one event per click to avoid spoilers. */
+export type FinaleProgress = {
+  sequenceIndex: number
+  step: number
+  winnerId: string
+  loserId: string
+  /** Opening credit order — shuffled so the victor is not telegraphed. */
+  introIds: readonly [string, string]
+}
+
 export type GameState = {
   day: number
   /** Next phase the player will resolve manually. */
@@ -40,6 +50,8 @@ export type GameState = {
   winnerId: string | null
   seed: number
   settings: GameSettings
+  /** Set while the final two are revealed beat-by-beat. */
+  finale: FinaleProgress | null
 }
 
 export type ImageCandidate = {

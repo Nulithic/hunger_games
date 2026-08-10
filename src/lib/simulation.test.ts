@@ -163,7 +163,7 @@ describe('simulation', () => {
     }
   })
 
-  it('shows the final duel before crowning when two tributes remain', () => {
+  it('reveals the finale one event per click before crowning', () => {
     const tributes = createTributesFromNames(
       ['A', 'B', 'C', 'D'],
       (() => {
@@ -182,10 +182,28 @@ describe('simulation', () => {
     expect(livingTributes(game)).toHaveLength(2)
     expect(game.status).toBe('running')
 
-    game = advancePhase(game)
+    const beforeFinale = game.log.length
+    game = advancePhase(game) // begin finale — opening only
+    expect(game.finale).not.toBeNull()
+    expect(game.log.length).toBe(beforeFinale + 1)
+    expect(livingTributes(game)).toHaveLength(2)
+    expect(game.log.slice(beforeFinale).every((event) => event.kind !== 'kill')).toBe(
+      true,
+    )
+
+    let guard = 0
+    while (game.finale != null && guard < 20) {
+      const before = game.log.length
+      game = advancePhase(game)
+      expect(game.log.length).toBe(before + 1)
+      guard += 1
+    }
+
+    const finaleEvents = game.log.slice(beforeFinale)
+    expect(game.finale).toBeNull()
     expect(game.status).toBe('running')
     expect(livingTributes(game)).toHaveLength(1)
-    expect(game.log.some((event) => event.kind === 'kill')).toBe(true)
+    expect(finaleEvents.some((event) => event.kind === 'kill')).toBe(true)
     expect(game.log.some((event) => event.kind === 'victory')).toBe(false)
 
     game = advancePhase(game)
@@ -241,7 +259,11 @@ describe('simulation', () => {
     expect(game.status).toBe('running')
 
     const beforeLog = game.log.length
-    game = advancePhase(game)
+    let guard = 0
+    while ((game.finale != null || livingTributes(game).length === 2) && guard < 30) {
+      game = advancePhase(game)
+      guard += 1
+    }
     const finaleEvents = game.log.slice(beforeLog)
     expect(livingTributes(game)).toHaveLength(1)
     expect(game.status).toBe('running')
