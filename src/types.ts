@@ -40,6 +40,16 @@ export type FinaleProgress = {
   introIds: readonly [string, string]
 }
 
+/** Precomputed phase revealed one event per click to avoid spoilers. */
+export type PhaseProgress = {
+  /** Index of the next event to reveal. */
+  step: number
+  events: readonly GameEvent[]
+  /** Calendar to apply after the last event is revealed. */
+  nextDay: number
+  nextPhase: Phase
+}
+
 export type GameState = {
   day: number
   /** Next phase the player will resolve manually. */
@@ -50,6 +60,8 @@ export type GameState = {
   winnerId: string | null
   seed: number
   settings: GameSettings
+  /** Set while a cornucopia/day/night phase is revealed beat-by-beat. */
+  phaseProgress: PhaseProgress | null
   /** Set while the final two are revealed beat-by-beat. */
   finale: FinaleProgress | null
 }

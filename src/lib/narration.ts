@@ -1,5 +1,19 @@
 import type { GameEvent } from '../types'
 
+/** SpeechSynthesisUtterance-friendly range; 1 is natural pace. */
+export const NARRATION_RATE_MIN = 0.5
+export const NARRATION_RATE_MAX = 2
+export const NARRATION_RATE_DEFAULT = 1
+
+export function clampNarrationRate(rate: number): number {
+  if (!Number.isFinite(rate)) return NARRATION_RATE_DEFAULT
+  return Math.min(NARRATION_RATE_MAX, Math.max(NARRATION_RATE_MIN, rate))
+}
+
+export type SpeakOptions = {
+  rate?: number
+}
+
 export type NarrationBackend = {
   cancel: () => void
   pause: () => void
@@ -7,6 +21,7 @@ export type NarrationBackend = {
   speak: (
     text: string,
     handlers: { onend: () => void; onerror: () => void },
+    options?: SpeakOptions,
   ) => void
 }
 
@@ -24,6 +39,8 @@ export type EventNarrator = {
   setMuted: (muted: boolean) => void
   isMuted: () => boolean
   isPaused: () => boolean
+  setRate: (rate: number) => void
+  getRate: () => number
 }
 
 export function textsFromLogSlice(
@@ -100,12 +117,12 @@ export function createBrowserNarrationBackend(
     resume: () => {
       resumeSafely()
     },
-    speak: (text, handlers) => {
+    speak: (text, handlers, options) => {
       const run = () => {
         speakTimer = null
         coolDown = false
         const utterance = new SpeechSynthesisUtterance(text)
-        utterance.rate = 0.95
+        utterance.rate = clampNarrationRate(options?.rate ?? NARRATION_RATE_DEFAULT)
         utterance.pitch = 0.95
         const voice = pickEnglishVoice(synth.getVoices())
         if (voice) utterance.voice = voice
@@ -138,9 +155,15 @@ export function createEventNarrator(
 ): EventNarrator {
   let muted = false
   let paused = false
+  let rate = NARRATION_RATE_DEFAULT
   let queue: string[] = []
   let token = 0
-  /** Line currently being spoken (for software pause restart). */
+  /**
+   * Bumped when a speak attempt is intentionally cancelled (rate change).
+   * Stale onend/onerror handlers must not advance the queue or fire onComplete.
+   */
+  let speakEpoch = 0
+  /** Line currently being spoken (for software pause / rate restart). */
   let currentLine: string | null = null
   let onComplete: (() => void) | null = null
 
@@ -173,30 +196,48 @@ export function createEventNarrator(
     }
 
     currentLine = text
-    activeBackend.speak(text, {
-      onend: () => {
-        if (paused || activeToken !== token) return
-        currentLine = null
-        speakNext(activeToken)
+    const epoch = speakEpoch
+    activeBackend.speak(
+      text,
+      {
+        onend: () => {
+          if (paused || activeToken !== token || epoch !== speakEpoch) return
+          currentLine = null
+          speakNext(activeToken)
+        },
+        onerror: () => {
+          // cancel() from pause/stop/rate-restart — ignore while paused/stale.
+          if (paused || activeToken !== token || epoch !== speakEpoch) return
+          currentLine = null
+          speakNext(activeToken)
+        },
       },
-      onerror: () => {
-        // cancel() from pause/stop often fires error — ignore while paused/stale.
-        if (paused || activeToken !== token) return
-        currentLine = null
-        speakNext(activeToken)
-      },
-    })
+      { rate },
+    )
   }
 
   return {
     isMuted: () => muted,
     isPaused: () => paused,
+    getRate: () => rate,
+    setRate(nextRate) {
+      rate = clampNarrationRate(nextRate)
+      if (muted || paused || !currentLine) return
+
+      // Restart the current beat at the new pace without treating cancel as "done".
+      speakEpoch += 1
+      queue = [currentLine, ...queue]
+      currentLine = null
+      activeBackend.cancel()
+      speakNext(token)
+    },
     setMuted(nextMuted) {
       muted = nextMuted
       if (nextMuted) {
         paused = false
         currentLine = null
         token += 1
+        speakEpoch += 1
         queue = []
         clearCompletion()
         activeBackend.cancel()
@@ -206,6 +247,7 @@ export function createEventNarrator(
       paused = false
       currentLine = null
       token += 1
+      speakEpoch += 1
       queue = []
       clearCompletion()
       activeBackend.cancel()
@@ -213,6 +255,7 @@ export function createEventNarrator(
     pause() {
       if (muted || paused) return
       paused = true
+      speakEpoch += 1
       // Chrome pause() is flaky — stop audio and keep the remaining lines.
       if (currentLine) {
         queue = [currentLine, ...queue]
@@ -235,6 +278,7 @@ export function createEventNarrator(
       paused = false
       currentLine = null
       token += 1
+      speakEpoch += 1
       const activeToken = token
       queue = [...lines]
       onComplete = options?.onComplete ?? null

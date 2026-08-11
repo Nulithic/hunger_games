@@ -4,6 +4,7 @@ import type {
   GameSettings,
   GameState,
   Phase,
+  PhaseProgress,
   Tribute,
 } from '../types'
 import {
@@ -57,6 +58,7 @@ export function createGame(
     winnerId: null,
     seed,
     settings: normalizeSettings(settings),
+    phaseProgress: null,
     finale: null,
   }
 }
@@ -574,7 +576,50 @@ function resolveStandardPhase(game: GameState, rng: () => number): PhaseResult {
   return { tributes, events }
 }
 
-function resolvePhase(game: GameState): GameState {
+function applyEventKill(tributes: Tribute[], event: GameEvent): Tribute[] {
+  if (event.kind !== 'kill') return tributes
+  const actorId = event.actorIds[0]
+  const victimId = event.victimIds[0]
+  if (!actorId || !victimId) return tributes
+  return applyKill(tributes, actorId, victimId)
+}
+
+/** Reveal one buffered phase event; apply kills only when that beat is shown. */
+function revealPhaseEvent(game: GameState, progress: PhaseProgress): GameState {
+  const event = progress.events[progress.step]
+  if (!event) {
+    return {
+      ...game,
+      phaseProgress: null,
+      day: progress.nextDay,
+      phase: progress.nextPhase,
+    }
+  }
+
+  // Always copy the roster so prior GameState snapshots stay immutable.
+  const tributes = applyEventKill(cloneTributes(game.tributes), event)
+  const nextStep = progress.step + 1
+  const done = nextStep >= progress.events.length
+
+  return {
+    ...game,
+    tributes,
+    log: [...game.log, event],
+    phaseProgress: done
+      ? null
+      : {
+          step: nextStep,
+          events: progress.events,
+          nextDay: progress.nextDay,
+          nextPhase: progress.nextPhase,
+        },
+    day: done ? progress.nextDay : game.day,
+    phase: done ? progress.nextPhase : game.phase,
+  }
+}
+
+/** Compute the full phase once, then reveal the first event. */
+function beginPhaseProgress(game: GameState): GameState {
   const phaseKey =
     game.phase === 'cornucopia' ? 0 : game.phase === 'day' ? 1 : 2
   const rng = createRng(game.seed + game.day * 9973 + phaseKey * 131)
@@ -584,28 +629,40 @@ function resolvePhase(game: GameState): GameState {
       ? resolveCornucopia(game, rng)
       : resolveStandardPhase(game, rng)
 
-  const resolved: GameState = {
-    ...game,
-    tributes: result.tributes,
-    log: [...game.log, ...result.events],
-  }
-
-  // Leave crowning for the next click so the final kill stays visible in the log.
-  if (livingTributes(resolved).length <= 1) {
-    return resolved
-  }
-
   const upcoming = nextPhaseState(game.day, game.phase)
-  return {
-    ...resolved,
-    day: upcoming.day,
-    phase: upcoming.phase,
+  if (result.events.length === 0) {
+    return {
+      ...game,
+      tributes: result.tributes,
+      phaseProgress: null,
+      day: upcoming.day,
+      phase: upcoming.phase,
+    }
   }
+
+  const progress: PhaseProgress = {
+    step: 0,
+    events: result.events,
+    nextDay: upcoming.day,
+    nextPhase: upcoming.phase,
+  }
+
+  return revealPhaseEvent({ ...game, phaseProgress: progress }, progress)
 }
 
-/** Resolve the current cornucopia, day, or night phase. Manual only — one phase per call. */
+function advancePhaseReveal(game: GameState): GameState {
+  const progress = game.phaseProgress
+  if (!progress) return beginPhaseProgress(game)
+  return revealPhaseEvent(game, progress)
+}
+
+/** Resolve cornucopia/day/night one event per click; finale stays its own path. */
 export function advancePhase(game: GameState): GameState {
   if (game.status === 'finished') return game
+  // Finish the current stepped phase before starting the finale duel.
+  if (game.phaseProgress != null) {
+    return advancePhaseReveal(game)
+  }
   // Finale is click-per-event; keep going until aftermath even after the last kill.
   if (game.finale != null || livingTributes(game).length === 2) {
     return advanceFinale(game)
@@ -613,7 +670,7 @@ export function advancePhase(game: GameState): GameState {
   if (livingTributes(game).length === 1) {
     return maybeFinish(game)
   }
-  return resolvePhase(game)
+  return beginPhaseProgress(game)
 }
 
 /** @deprecated Use advancePhase — kept as an alias for clarity in older tests. */
@@ -632,6 +689,12 @@ export function advanceActionLabel(game: GameState): string {
     const total = finaleTotalSteps(game.finale.sequenceIndex)
     const next = Math.min(game.finale.step + 1, total)
     return `Continue Finale (${next}/${total})`
+  }
+  if (game.phaseProgress != null) {
+    const total = game.phaseProgress.events.length
+    const next = Math.min(game.phaseProgress.step + 1, total)
+    const title = phaseLabel(game.day, game.phase)
+    return `Continue ${title} (${next}/${total})`
   }
   if (livingTributes(game).length === 1) return 'Crown the Victor'
   if (game.phase === 'cornucopia') return 'Begin the Cornucopia'

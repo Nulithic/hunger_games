@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
+import type { GameState } from '../types'
 import { createTributesFromNames } from './names'
 import { createGame, advancePhase, livingTributes } from './simulation'
+
+/** Drain a stepped cornucopia/day/night until the calendar advances. */
+function advanceFullPhase(game: GameState): GameState {
+  let next = advancePhase(game)
+  let guard = 0
+  while (next.phaseProgress != null && guard < 80) {
+    next = advancePhase(next)
+    guard += 1
+  }
+  return next
+}
 
 describe('simulation', () => {
   it('starts waiting for the cornucopia bloodbath', () => {
@@ -12,9 +24,51 @@ describe('simulation', () => {
     expect(game.day).toBe(1)
     expect(game.phase).toBe('cornucopia')
     expect(game.status).toBe('running')
+    expect(game.phaseProgress).toBeNull()
     expect(livingTributes(game)).toHaveLength(4)
     expect(game.winnerId).toBeNull()
     expect(game.settings.cornucopiaKills).toBe(2)
+  })
+
+  it('reveals cornucopia/day/night one event per click', () => {
+    const tributes = createTributesFromNames(
+      ['A', 'B', 'C', 'D', 'E', 'F'],
+      (() => {
+        let n = 0
+        return () => `id-${n++}`
+      })(),
+    )
+    let game = createGame(tributes, 3, {
+      cornucopiaKills: 1,
+      earlyPhaseKills: 0,
+      latePhaseKills: 0,
+    })
+
+    game = advancePhase(game)
+    expect(game.phaseProgress).not.toBeNull()
+    expect(game.phase).toBe('cornucopia')
+    expect(game.log).toHaveLength(1)
+    expect(game.log[0]?.phase).toBe('cornucopia')
+
+    const total = game.phaseProgress!.events.length
+    expect(total).toBeGreaterThan(1)
+
+    let guard = 0
+    while (game.phaseProgress != null && guard < 80) {
+      const before = game.log.length
+      const killBefore = game.tributes.filter((t) => !t.alive).length
+      game = advancePhase(game)
+      expect(game.log.length).toBe(before + 1)
+      const latest = game.log[game.log.length - 1]!
+      if (latest.kind === 'kill') {
+        expect(game.tributes.filter((t) => !t.alive).length).toBe(killBefore + 1)
+      }
+      guard += 1
+    }
+
+    expect(game.phaseProgress).toBeNull()
+    expect(game.phase).toBe('day')
+    expect(game.log.every((event) => event.phase === 'cornucopia')).toBe(true)
   })
 
   it('honors cornucopia kill settings', () => {
@@ -30,7 +84,7 @@ describe('simulation', () => {
       earlyPhaseKills: 0,
       latePhaseKills: 0,
     })
-    const after = advancePhase(start)
+    const after = advanceFullPhase(start)
     const fallen = after.tributes.filter((t) => !t.alive).length
     expect(fallen).toBe(3)
   })
@@ -44,7 +98,7 @@ describe('simulation', () => {
       })(),
     )
     // Force everyone into the rush bucket.
-    const after = advancePhase(
+    const after = advanceFullPhase(
       createGame(tributes, 3, {
         cornucopiaRushPercent: 100,
         cornucopiaKills: 0,
@@ -73,7 +127,7 @@ describe('simulation', () => {
       })(),
     )
     const start = createGame(tributes, 3)
-    const afterCornucopia = advancePhase(start)
+    const afterCornucopia = advanceFullPhase(start)
 
     expect(start.phase).toBe('cornucopia')
     expect(afterCornucopia.log.some((e) => e.kind === 'opening')).toBe(true)
@@ -85,12 +139,12 @@ describe('simulation', () => {
     expect(afterCornucopia.phase).toBe('day')
     expect(afterCornucopia.day).toBe(1)
 
-    const afterDay = advancePhase(afterCornucopia)
+    const afterDay = advanceFullPhase(afterCornucopia)
     if (afterDay.status === 'finished') return
     expect(afterDay.phase).toBe('night')
     expect(afterDay.log.some((e) => e.phase === 'day')).toBe(true)
 
-    const afterNight = advancePhase(afterDay)
+    const afterNight = advanceFullPhase(afterDay)
     if (afterNight.status === 'finished') return
     expect(afterNight.day).toBe(2)
     expect(afterNight.phase).toBe('day')
@@ -106,7 +160,7 @@ describe('simulation', () => {
     )
     let game = createGame(tributes, 7)
     let guard = 0
-    while (game.status !== 'finished' && guard < 100) {
+    while (game.status !== 'finished' && guard < 400) {
       game = advancePhase(game)
       guard += 1
     }
@@ -128,7 +182,7 @@ describe('simulation', () => {
 
     let a = createGame(make(), 99)
     let b = createGame(make(), 99)
-    for (let i = 0; i < 12; i += 1) {
+    for (let i = 0; i < 40; i += 1) {
       a = advancePhase(a)
       b = advancePhase(b)
     }
@@ -151,7 +205,7 @@ describe('simulation', () => {
       )
       let game = createGame(tributes, 44, preset)
       let guard = 0
-      while (game.status !== 'finished' && guard < 80) {
+      while (game.status !== 'finished' && guard < 400) {
         game = advancePhase(game)
         guard += 1
         if (game.status === 'finished') {
@@ -178,7 +232,7 @@ describe('simulation', () => {
       latePhaseKills: 0,
       earlyDays: 2,
     })
-    game = advancePhase(game)
+    game = advanceFullPhase(game)
     expect(livingTributes(game)).toHaveLength(2)
     expect(game.status).toBe('running')
 
@@ -225,9 +279,9 @@ describe('simulation', () => {
       latePhaseKills: 1,
       earlyDays: 2,
     })
-    game = advancePhase(game) // cornucopia
+    game = advanceFullPhase(game) // cornucopia
     expect(livingTributes(game)).toHaveLength(3)
-    game = advancePhase(game) // day 1: one kill → two left, not finished yet
+    game = advanceFullPhase(game) // day 1: one kill → two left, not finished yet
     expect(game.status).toBe('running')
     expect(livingTributes(game)).toHaveLength(2)
   })
@@ -247,7 +301,7 @@ describe('simulation', () => {
       earlyDays: 2,
     })
 
-    for (let i = 0; i < 40 && livingTributes(game).length > 2; i += 1) {
+    for (let i = 0; i < 200 && livingTributes(game).length > 2; i += 1) {
       const before = livingTributes(game).length
       game = advancePhase(game)
       const after = livingTributes(game).length
@@ -295,13 +349,23 @@ describe('simulation', () => {
       earlyDays: 4,
     })
 
-    for (let i = 0; i < 20 && game.status !== 'finished'; i += 1) {
+    for (let i = 0; i < 40 && game.status !== 'finished'; i += 1) {
       const beforeAlive = livingTributes(game).length
+      if (beforeAlive <= 2) {
+        game = advancePhase(game)
+        continue
+      }
+
+      // Collect one full stepped phase worth of events.
       const beforeLog = game.log.length
-      game = advancePhase(game)
-      // Finale scripts intentionally feature both finalists across several beats.
+      const phaseAtStart = game.phase
+      const dayAtStart = game.day
+      game = advanceFullPhase(game)
       if (beforeAlive <= 2) continue
-      const phaseEvents = game.log.slice(beforeLog)
+
+      const phaseEvents = game.log.slice(beforeLog).filter(
+        (event) => event.day === dayAtStart && event.phase === phaseAtStart,
+      )
       const flavorEvents = phaseEvents.filter(
         (event) =>
           (event.phase === 'day' || event.phase === 'night') &&
@@ -331,7 +395,10 @@ describe('simulation', () => {
     const next = advancePhase(start)
     expect(start.day).toBe(1)
     expect(start.phase).toBe('cornucopia')
+    expect(start.phaseProgress).toBeNull()
     expect(next).not.toBe(start)
     expect(next.tributes).not.toBe(start.tributes)
+    expect(next.phaseProgress).not.toBeNull()
+    expect(next.log).toHaveLength(1)
   })
 })

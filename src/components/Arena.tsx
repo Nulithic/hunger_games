@@ -3,6 +3,9 @@ import { districtAccentStyle, groupTributesByDistrict } from '../lib/districts'
 import { groupEventsByPhase, type EventLogSection } from '../lib/eventLog'
 import {
   createEventNarrator,
+  NARRATION_RATE_DEFAULT,
+  NARRATION_RATE_MAX,
+  NARRATION_RATE_MIN,
   type EventNarrator,
 } from '../lib/narration'
 import {
@@ -29,13 +32,16 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   const narratorRef = useRef<EventNarrator>(narrator ?? createEventNarrator())
   const gameRef = useRef(game)
   const onAdvanceRef = useRef(onAdvance)
-  /** While true, finishing a spoken line advances the next finale beat. */
-  const finaleAutoplayRef = useRef(false)
+  /** While true, finishing a spoken line advances the next stepped beat. */
+  const beatAutoplayRef = useRef(false)
   /** Speak only log entries at/after this index after an auto-advance. */
   const speakFromRef = useRef(0)
+  /** Debounce rate restarts so dragging the slider does not stutter every tick. */
+  const rateTimerRef = useRef<number | null>(null)
   const [showTributes, setShowTributes] = useState(false)
   const [playingKey, setPlayingKey] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
+  const [narrationRate, setNarrationRate] = useState(NARRATION_RATE_DEFAULT)
   const alive = livingTributes(game)
   const fallen = game.tributes.filter((t) => !t.alive)
   const districts = groupTributesByDistrict(game.tributes)
@@ -55,13 +61,23 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     // Per-phase buttons opt in; keep the engine ready to speak on click.
     active.setMuted(false)
     return () => {
-      finaleAutoplayRef.current = false
+      beatAutoplayRef.current = false
+      if (rateTimerRef.current != null) window.clearTimeout(rateTimerRef.current)
       active.stop()
     }
   }, [])
 
-  function stopFinaleAutoplay() {
-    finaleAutoplayRef.current = false
+  function handleNarrationRateChange(next: number) {
+    setNarrationRate(next)
+    if (rateTimerRef.current != null) window.clearTimeout(rateTimerRef.current)
+    rateTimerRef.current = window.setTimeout(() => {
+      rateTimerRef.current = null
+      narratorRef.current.setRate(next)
+    }, 120)
+  }
+
+  function stopBeatAutoplay() {
+    beatAutoplayRef.current = false
   }
 
   function clearPlaying(sectionKey: string) {
@@ -69,9 +85,12 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     setPaused(false)
   }
 
-  function shouldContinueFinaleAutoplay(state: GameState): boolean {
-    // Stop once the aftermath is on the log (finale progress clears).
-    return state.status !== 'finished' && state.finale != null
+  function isSteppingBeats(state: GameState): boolean {
+    return state.finale != null || state.phaseProgress != null
+  }
+
+  function shouldContinueBeatAutoplay(state: GameState): boolean {
+    return state.status !== 'finished' && isSteppingBeats(state)
   }
 
   function speakSectionTexts(sectionKey: string, texts: string[]) {
@@ -83,14 +102,14 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     narratorRef.current.setMuted(false)
     narratorRef.current.speakAll(lines, {
       onComplete: () => {
-        if (!finaleAutoplayRef.current) {
+        if (!beatAutoplayRef.current) {
           clearPlaying(sectionKey)
           return
         }
 
         const state = gameRef.current
-        if (!shouldContinueFinaleAutoplay(state)) {
-          stopFinaleAutoplay()
+        if (!shouldContinueBeatAutoplay(state)) {
+          stopBeatAutoplay()
           clearPlaying(sectionKey)
           return
         }
@@ -103,7 +122,26 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
 
   function handleAdvanceClick() {
     if (advanceLockRef.current || game.status === 'finished') return
-    stopFinaleAutoplay()
+
+    const narrating = playingKey != null || beatAutoplayRef.current
+    const stepping = isSteppingBeats(game)
+
+    if (narrating && stepping) {
+      // Skip the current line: jump to the next beat and keep narrating there.
+      beatAutoplayRef.current = true
+      speakFromRef.current = game.log.length
+      narratorRef.current.stop()
+      setPaused(false)
+      setPlayingKey(latestKey)
+      advanceLockRef.current = true
+      onAdvance()
+      window.setTimeout(() => {
+        advanceLockRef.current = false
+      }, 400)
+      return
+    }
+
+    stopBeatAutoplay()
     narratorRef.current.stop()
     setPlayingKey(null)
     setPaused(false)
@@ -116,10 +154,10 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
 
   function handleNarrateSection(section: EventLogSection) {
     const isLatest = section.key === latestKey
-    const autoplay = isLatest && game.finale != null
-    finaleAutoplayRef.current = autoplay
+    const autoplay = isLatest && isSteppingBeats(game)
+    beatAutoplayRef.current = autoplay
 
-    // Finale shares the phase section — speak only revealed finale beats, not the whole night.
+    // While stepping, the section only contains revealed beats — speak those, then continue.
     const texts =
       autoplay && game.finale != null
         ? section.events.slice(-game.finale.step).map((event) => event.text)
@@ -141,16 +179,16 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     setPaused(true)
   }
 
-  // After finale autoplay advances, narrate the newly revealed beat(s).
+  // After beat autoplay advances, narrate the newly revealed line(s).
   useEffect(() => {
-    if (!finaleAutoplayRef.current) return
+    if (!beatAutoplayRef.current) return
     if (paused) return
 
     const from = speakFromRef.current
     const fresh = game.log.slice(from).map((event) => event.text)
     if (fresh.length === 0) {
-      if (!shouldContinueFinaleAutoplay(game)) {
-        stopFinaleAutoplay()
+      if (!shouldContinueBeatAutoplay(game)) {
+        stopBeatAutoplay()
         setPlayingKey(null)
         setPaused(false)
       }
@@ -161,8 +199,8 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     const sectionKey = latestKey ?? `${game.day}-${game.phase}`
     speakSectionTexts(sectionKey, fresh)
     // speakSectionTexts closes over the latest autoplay/narrator refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only from log/finale progress
-  }, [game.log.length, game.finale, game.status, paused, latestKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drive only from log / step progress
+  }, [game.log.length, game.finale, game.phaseProgress, game.status, paused, latestKey])
 
   const previousLatestKeyRef = useRef<string | null>(null)
 
@@ -172,10 +210,10 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     const section = latestSectionRef.current
     if (!feed || !section || typeof feed.scrollTo !== 'function') return
 
-    // New phase → jump to section top. Finale beats (same section) → follow the new line.
+    // New phase → jump to section top. Stepped beats (same section) → follow the new line.
     const sameSection = previousLatestKeyRef.current === latestKey
     previousLatestKeyRef.current = latestKey
-    const followEvent = sameSection || game.finale != null
+    const followEvent = sameSection || isSteppingBeats(game)
 
     const scrollIntoView = () => {
       const target = followEvent
@@ -192,7 +230,7 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
       window.requestAnimationFrame(scrollIntoView)
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [latestKey, game.log.length, game.finale])
+  }, [latestKey, game.log.length, game.finale, game.phaseProgress])
 
   const waitingLabel = phaseLabel(game.day, game.phase)
   const lastResolved =
@@ -282,6 +320,27 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
               )}
             </div>
             <div className="feed-actions">
+              <label className="narration-speed">
+                <span className="narration-speed-label">
+                  Speed <span className="narration-speed-value">{narrationRate.toFixed(1)}×</span>
+                </span>
+                <input
+                  type="range"
+                  className="narration-speed-slider"
+                  min={NARRATION_RATE_MIN}
+                  max={NARRATION_RATE_MAX}
+                  step={0.1}
+                  value={narrationRate}
+                  onChange={(event) => {
+                    handleNarrationRateChange(Number(event.target.value))
+                  }}
+                  aria-valuemin={NARRATION_RATE_MIN}
+                  aria-valuemax={NARRATION_RATE_MAX}
+                  aria-valuenow={narrationRate}
+                  aria-valuetext={`${narrationRate.toFixed(1)} times speed`}
+                  title="Narration speed"
+                />
+              </label>
               <button
                 type="button"
                 className="btn primary feed-advance"

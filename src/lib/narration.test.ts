@@ -1,14 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { GameEvent } from '../types'
 import {
+  clampNarrationRate,
   createBrowserNarrationBackend,
   createEventNarrator,
+  NARRATION_RATE_DEFAULT,
+  NARRATION_RATE_MAX,
+  NARRATION_RATE_MIN,
   textsFromLogSlice,
   type NarrationBackend,
+  type SpeakOptions,
 } from './narration'
 
 function makeBackend() {
   const spoken: string[] = []
+  const rates: number[] = []
   const handlers: Array<{ onend: () => void; onerror: () => void }> = []
   let cancelled = 0
   let paused = false
@@ -17,7 +23,8 @@ function makeBackend() {
     cancel: () => {
       cancelled += 1
       paused = false
-      handlers.length = 0
+      const pending = handlers.splice(0)
+      for (const handler of pending) handler.onerror()
     },
     pause: () => {
       paused = true
@@ -25,8 +32,9 @@ function makeBackend() {
     resume: () => {
       paused = false
     },
-    speak: (text, next) => {
+    speak: (text, next, options?: SpeakOptions) => {
       spoken.push(text)
+      rates.push(options?.rate ?? NARRATION_RATE_DEFAULT)
       handlers.push(next)
     },
   }
@@ -34,6 +42,7 @@ function makeBackend() {
   return {
     backend,
     spoken,
+    rates,
     finishCurrent: () => {
       const current = handlers.shift()
       current?.onend()
@@ -149,6 +158,37 @@ describe('createEventNarrator', () => {
 
     narrator.speakAll(['Only'], { onComplete })
     expect(onComplete).not.toHaveBeenCalled()
+    mock.finishCurrent()
+    expect(onComplete).toHaveBeenCalledTimes(1)
+  })
+
+  it('restarts the current beat at the new rate without skipping ahead', () => {
+    expect(clampNarrationRate(0.1)).toBe(NARRATION_RATE_MIN)
+    expect(clampNarrationRate(9)).toBe(NARRATION_RATE_MAX)
+    expect(clampNarrationRate(Number.NaN)).toBe(NARRATION_RATE_DEFAULT)
+
+    const mock = makeBackend()
+    const narrator = createEventNarrator(mock.backend)
+    const onComplete = vi.fn()
+    expect(narrator.getRate()).toBe(NARRATION_RATE_DEFAULT)
+
+    narrator.setRate(1.5)
+    narrator.speakAll(['One', 'Two'], { onComplete })
+    expect(mock.spoken).toEqual(['One'])
+    expect(mock.rates[0]).toBe(1.5)
+
+    // Mid-beat speed change restarts the same line; cancel must not finish the queue.
+    narrator.setRate(1.75)
+    expect(narrator.getRate()).toBe(1.75)
+    expect(mock.spoken).toEqual(['One', 'One'])
+    expect(mock.rates[1]).toBe(1.75)
+    expect(onComplete).not.toHaveBeenCalled()
+
+    mock.finishCurrent()
+    expect(mock.spoken).toEqual(['One', 'One', 'Two'])
+    expect(mock.rates[2]).toBe(1.75)
+    expect(onComplete).not.toHaveBeenCalled()
+
     mock.finishCurrent()
     expect(onComplete).toHaveBeenCalledTimes(1)
   })

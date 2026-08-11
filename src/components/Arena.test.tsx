@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -44,6 +44,16 @@ function FinaleArena({
   )
 }
 
+function advanceFullPhase(game: GameState): GameState {
+  let next = advancePhase(game)
+  let guard = 0
+  while (next.phaseProgress != null && guard < 80) {
+    next = advancePhase(next)
+    guard += 1
+  }
+  return next
+}
+
 function gameAtFinaleOpening(): GameState {
   const tributes = createTributesFromNames(
     ['A', 'B', 'C', 'D'],
@@ -58,10 +68,29 @@ function gameAtFinaleOpening(): GameState {
     latePhaseKills: 0,
     earlyDays: 2,
   })
-  game = advancePhase(game)
+  game = advanceFullPhase(game)
   expect(livingTributes(game)).toHaveLength(2)
   game = advancePhase(game) // begin finale — opening only
   expect(game.finale).not.toBeNull()
+  return game
+}
+
+function gameAtCornucopiaOpening(): GameState {
+  const tributes = createTributesFromNames(
+    ['A', 'B', 'C', 'D', 'E', 'F'],
+    (() => {
+      let n = 0
+      return () => `id-${n++}`
+    })(),
+  )
+  let game = createGame(tributes, 3, {
+    cornucopiaKills: 1,
+    earlyPhaseKills: 0,
+    latePhaseKills: 0,
+  })
+  game = advancePhase(game)
+  expect(game.phaseProgress).not.toBeNull()
+  expect(game.log).toHaveLength(1)
   return game
 }
 
@@ -72,6 +101,7 @@ const baseGame: GameState = {
   status: 'running',
   winnerId: null,
   settings: DEFAULT_SETTINGS,
+  phaseProgress: null,
   finale: null,
   tributes: [
     {
@@ -195,6 +225,32 @@ describe('Arena', () => {
     })
   })
 
+  it('updates narrator rate from the speed slider', async () => {
+    vi.useFakeTimers()
+    const { backend } = mockNarrationBackend()
+    const narrator = createEventNarrator(backend)
+    const setRate = vi.spyOn(narrator, 'setRate')
+    render(
+      <Arena
+        game={baseGame}
+        onAdvance={vi.fn()}
+        onReset={vi.fn()}
+        narrator={narrator}
+      />,
+    )
+
+    const slider = screen.getByRole('slider', { name: /speed/i })
+    expect(slider).toHaveValue('1')
+    fireEvent.change(slider, { target: { value: '1.5' } })
+    expect(screen.getByText('1.5×')).toBeInTheDocument()
+    expect(setRate).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(120)
+    expect(setRate).toHaveBeenCalledWith(1.5)
+    expect(narrator.getRate()).toBe(1.5)
+    vi.useRealTimers()
+  })
+
   it('auto-advances finale beats while narrating the latest section', async () => {
     const user = userEvent.setup()
     const { spoken, handlers, backend } = mockNarrationBackend()
@@ -223,5 +279,49 @@ describe('Arena', () => {
     await waitFor(() => {
       expect(spoken.length).toBe(3)
     })
+  })
+
+  it('auto-advances cornucopia beats while narrating the latest section', async () => {
+    const user = userEvent.setup()
+    const { spoken, handlers, backend } = mockNarrationBackend()
+    const narrator = createEventNarrator(backend)
+    const initial = gameAtCornucopiaOpening()
+    const openingText = initial.log[0]!.text
+
+    render(<FinaleArena initial={initial} narrator={narrator} />)
+
+    await user.click(screen.getByRole('button', { name: /^narrate$/i }))
+    expect(spoken).toEqual([openingText])
+    expect(screen.getByRole('button', { name: /continue cornucopia/i })).toBeInTheDocument()
+
+    handlers.shift()?.onend()
+
+    await waitFor(() => {
+      expect(spoken.length).toBe(2)
+    })
+    expect(spoken[1]).not.toBe(openingText)
+    expect(screen.getByRole('button', { name: /continue cornucopia/i })).toBeInTheDocument()
+  })
+
+  it('skips to the next beat and narrates it when Continue is clicked mid-narration', async () => {
+    const user = userEvent.setup()
+    const { spoken, handlers, backend } = mockNarrationBackend()
+    const narrator = createEventNarrator(backend)
+    const initial = gameAtCornucopiaOpening()
+    const openingText = initial.log[0]!.text
+
+    render(<FinaleArena initial={initial} narrator={narrator} />)
+
+    await user.click(screen.getByRole('button', { name: /^narrate$/i }))
+    expect(spoken).toEqual([openingText])
+    expect(handlers.length).toBe(1)
+
+    await user.click(screen.getByRole('button', { name: /continue cornucopia/i }))
+
+    await waitFor(() => {
+      expect(spoken.length).toBe(2)
+    })
+    expect(spoken[1]).not.toBe(openingText)
+    expect(screen.getByTitle(/pause narration/i)).toBeInTheDocument()
   })
 })
