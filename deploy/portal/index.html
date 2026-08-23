@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Taenae's Fae Gaes</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-0: #0e100c;
+        --bg-1: #171b13;
+        --ember: #d95d1a;
+        --ember-hot: #f0a14a;
+        --moss: #6f7d4e;
+        --ash: #a39c8f;
+        --fog: #e7e1d4;
+        --line: rgba(231, 225, 212, 0.14);
+        --font-display: 'Bebas Neue', 'Arial Narrow', sans-serif;
+        --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-width: 320px;
+        color: var(--fog);
+        font-family: var(--font-body);
+        background:
+          radial-gradient(1100px 560px at 8% -12%, rgba(217, 93, 26, 0.2), transparent 55%),
+          radial-gradient(820px 460px at 92% 4%, rgba(111, 125, 78, 0.18), transparent 50%),
+          linear-gradient(180deg, #14180f 0%, var(--bg-0) 42%, #0a0c08 100%);
+      }
+
+      .atmosphere {
+        pointer-events: none;
+        position: fixed;
+        inset: 0;
+        background: repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(255, 255, 255, 0.015) 3px
+        );
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 85%);
+      }
+
+      main {
+        position: relative;
+        z-index: 1;
+        width: min(40rem, calc(100% - 2rem));
+        margin: 0 auto;
+        padding: 18vh 0 4rem;
+      }
+
+      header {
+        margin-bottom: 2.25rem;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: clamp(2.8rem, 9vw, 4.6rem);
+        font-weight: 400;
+        letter-spacing: 0.04em;
+        line-height: 0.92;
+        text-wrap: balance;
+        color: var(--fog);
+      }
+
+      .subtitle {
+        display: block;
+        margin-top: 0.7rem;
+        color: var(--ash);
+        font-size: 0.78rem;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .games {
+        display: grid;
+        gap: 0.85rem;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .game {
+        display: block;
+        padding: 1.05rem 1.15rem 1.1rem;
+        border: 1px solid var(--line);
+        border-radius: 0.7rem;
+        background: rgba(23, 27, 19, 0.78);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+        color: inherit;
+        text-decoration: none;
+        transition:
+          border-color 0.16s ease,
+          transform 0.16s ease,
+          background 0.16s ease;
+      }
+
+      .game:hover {
+        border-color: rgba(240, 161, 74, 0.45);
+        background: rgba(34, 40, 28, 0.92);
+        transform: translateY(-1px);
+      }
+
+      .game:focus-visible {
+        outline: 2px solid rgba(240, 161, 74, 0.8);
+        outline-offset: 3px;
+      }
+
+      .game-kicker {
+        display: block;
+        margin-bottom: 0.28rem;
+        color: var(--ember-hot);
+        font-size: 0.68rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .game-title {
+        display: block;
+        font-family: var(--font-display);
+        font-size: 1.7rem;
+        letter-spacing: 0.05em;
+        line-height: 1;
+      }
+
+      .game-copy {
+        margin: 0.45rem 0 0;
+        color: var(--ash);
+        font-size: 0.92rem;
+        line-height: 1.45;
+        text-wrap: pretty;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="atmosphere" aria-hidden="true"></div>
+    <main>
+      <header>
+        <h1>Taenae's Fae Gaes</h1>
+        <span class="subtitle">(Tony's Fun Games)</span>
+      </header>
+      <ul class="games">
+        <li>
+          <a class="game" href="/hunger_games/">
+            <span class="game-kicker">Arena sim</span>
+            <span class="game-title">Hunger Games</span>
+            <p class="game-copy">Pair names into districts and watch the arena play out.</p>
+          </a>
+        </li>
+      </ul>
+    </main>
+  </body>
+</html>

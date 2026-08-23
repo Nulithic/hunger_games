@@ -16,7 +16,48 @@ The app is built for **`/hunger_games/`** (as on `https://taenae.app/hunger_game
 - `npm run dev` — local app
 - `npm test` — unit tests
 - `npm run test:coverage` — coverage report
-- `npm run build` — production build
+- `npm run build` — production build (`tsc -b && vite build`; use `npx vite build` if typecheck fails)
+- `npm run image-search` — portrait API on `127.0.0.1:4174` (VPS / production)
+
+## Deploy (taenae.app)
+
+Live layout on the VPS:
+
+| URL | Serves |
+|-----|--------|
+| `https://taenae.app/` | Portal from [deploy/portal](deploy/portal) |
+| `https://taenae.app/hunger_games/` | This app’s `dist/` |
+| `https://taenae.app/api/kokoro/` | Docker Kokoro on `127.0.0.1:8880` |
+| `https://taenae.app/api/image-search` | Dedicated image-search unit on `127.0.0.1:4174` |
+
+Paths on the box:
+
+```text
+/home/ubuntu/taenae/hunger_games      # git clone
+/home/ubuntu/taenae/www/hunger_games  # published dist/
+/home/ubuntu/taenae/www/portal        # home portal
+```
+
+Caddy config: [deploy/Caddyfile](deploy/Caddyfile). Image search unit: [deploy/image-search.service](deploy/image-search.service) (`hunger-games-image-search`). Build with `VITE_KOKORO_URL=/api/kokoro`.
+
+### Update an existing VPS
+
+```bash
+cd /home/ubuntu/taenae/hunger_games
+git pull
+npm ci
+npx vite build
+rsync -a --delete dist/ /home/ubuntu/taenae/www/hunger_games/
+rsync -a --delete deploy/portal/ /home/ubuntu/taenae/www/portal/
+```
+
+Restart `hunger-games-image-search` only if the image-search server code changed:
+
+```bash
+sudo systemctl restart hunger-games-image-search
+```
+
+Kokoro and Caddy stay running.
 
 ## How it works
 
@@ -24,7 +65,7 @@ The app is built for **`/hunger_games/`** (as on `https://taenae.app/hunger_game
 2. Review fetched portraits (re-search or use avatar)
 3. Watch day-by-day arena events until one victor remains
 
-Image search uses `/api/image-search`. Locally that is the Vite plugin (`npm run dev`). On the VPS run `npm run image-search` (or the systemd unit in `deploy/image-search.service`) and proxy it with Caddy.
+Image search uses `/api/image-search`. Locally that is the Vite plugin (`npm run dev`). On the VPS it is the dedicated `hunger-games-image-search` unit (see Deploy).
 
 ## Narration
 
