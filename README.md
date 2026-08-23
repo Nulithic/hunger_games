@@ -24,7 +24,7 @@ The app is built for **`/hunger_games/`** (as on `https://taenae.app/hunger_game
 2. Review fetched portraits (re-search or use avatar)
 3. Watch day-by-day arena events until one victor remains
 
-Image search uses the Vite/preview server route `/api/image-search` (needs `npm run dev` or `npm run preview`).
+Image search uses `/api/image-search`. Locally that is the Vite plugin (`npm run dev`). On the VPS run `npm run image-search` (or the systemd unit in `deploy/image-search.service`) and proxy it with Caddy.
 
 ## Narration
 

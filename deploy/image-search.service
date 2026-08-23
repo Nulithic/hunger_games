@@ -1,0 +1,16 @@
+[Unit]
+Description=Hunger Games portrait image search
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/taenae/hunger_games
+Environment=IMAGE_SEARCH_HOST=127.0.0.1
+Environment=IMAGE_SEARCH_PORT=4174
+ExecStart=/home/ubuntu/taenae/hunger_games/node_modules/.bin/tsx server/imageSearchServer.ts
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

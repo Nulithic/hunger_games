@@ -1,11 +1,11 @@
-# Example site config for taenae.app
+# Site config for taenae.app under /home/ubuntu/taenae
 # Copy into /etc/caddy/Caddyfile (or import from there).
 #
 # Layout:
-#   /                      → portal (separate from this repo)
-#   /hunger_games/*        → this app's dist/
+#   /                      → portal (www/portal)
+#   /hunger_games/*        → published dist (www/hunger_games)
 #   /api/kokoro*           → Docker Kokoro on 127.0.0.1:8880
-#   /api/image-search*     → optional: uncomment and run `npm run preview` on :4173
+#   /api/image-search*     → image-search service on 127.0.0.1:4174
 
 taenae.app {
 	encode gzip
@@ -14,22 +14,18 @@ taenae.app {
 		reverse_proxy 127.0.0.1:8880
 	}
 
-	# Portrait search: uncomment the proxy (and comment the 404) if you run
-	# `npm run preview` on 127.0.0.1:4173. Otherwise return a real 404 so the
-	# app falls back to Wikipedia / avatars instead of portal HTML.
 	handle /api/image-search* {
-		respond 404
-		# reverse_proxy 127.0.0.1:4173
+		reverse_proxy 127.0.0.1:4174
 	}
 
 	handle /hunger_games/* {
-		root * /var/www/taenae.app
+		root * /home/ubuntu/taenae/www
 		try_files {path} /hunger_games/index.html
 		file_server
 	}
 
 	handle {
-		root * /var/www/taenae.app/portal
+		root * /home/ubuntu/taenae/www/portal
 		file_server
 	}
 }

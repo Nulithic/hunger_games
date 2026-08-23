@@ -22,6 +22,8 @@
   "include": [
     "vite.config.ts",
     "server/ddgImageSearch.ts",
+    "server/imageSearchApi.ts",
+    "server/imageSearchServer.ts",
     "server/imageSearchPlugin.ts",
     "server/appBaseRedirectPlugin.ts",
     "src/lib/appBase.ts"
