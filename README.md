@@ -9,6 +9,8 @@ npm install
 npm run dev
 ```
 
+The app is built for **`/hunger_games/`** (as on `https://taenae.app/hunger_games/`). `npm run dev` redirects `/` to `/hunger_games/`. Override with `VITE_BASE=/` in `.env.local` if you want the host root instead.
+
 ## Scripts
 
 - `npm run dev` — local app
@@ -28,4 +30,4 @@ Image search uses the Vite/preview server route `/api/image-search` (needs `npm 
 
 Arena narration uses the browser speech API by default. For higher-quality local voices, run Kokoro TTS in Docker on your PC (CPU or NVIDIA GPU) — the app probes it automatically, offers a voice picker, and falls back to the browser if it is offline.
 
-See [docs/narration-kokoro.md](docs/narration-kokoro.md).
+See [docs/narration-kokoro.md](docs/narration-kokoro.md). For a VPS behind Caddy (same host as the app), use [deploy/Caddyfile](deploy/Caddyfile) and keep `VITE_KOKORO_URL=/api/kokoro` at build time.

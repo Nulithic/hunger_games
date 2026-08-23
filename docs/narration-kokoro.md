@@ -43,9 +43,20 @@ GPU is optional — CPU is fine for short arena beats. Use GPU if you want lower
 npm run dev
 ```
 
-Vite proxies `/api/kokoro` → `http://127.0.0.1:8880` (see `vite.config.ts`), so the browser avoids CORS issues.
+Vite proxies `/api/kokoro` → `http://127.0.0.1:8880` (see `vite.config.ts`), so the browser avoids CORS issues. The UI lives at `/hunger_games/`; APIs stay on the host root (`/api/kokoro`, `/api/image-search`).
 
 In the arena, the footer shows **Narrator: Kokoro** when the probe succeeds, or **Narrator: Browser** when Kokoro is down. With Kokoro active, use the **Voice** dropdown to pick a narrator (choice is saved in local storage).
+
+## VPS (taenae.app, CPU, same host)
+
+On the server, run the CPU compose file only. Keep port 8880 on localhost. Put Caddy in front using [deploy/Caddyfile](../deploy/Caddyfile) so the browser calls `https://taenae.app/api/kokoro` (same origin — no CORS). Build with:
+
+```env
+VITE_BASE=/hunger_games/
+VITE_KOKORO_URL=/api/kokoro
+```
+
+Publish `dist/` to `/var/www/taenae.app/hunger_games/`. The home portal at `/` is a separate static site.
 
 ## Stop Kokoro
 

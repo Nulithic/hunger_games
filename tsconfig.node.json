@@ -19,5 +19,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "server/ddgImageSearch.ts", "server/imageSearchPlugin.ts"]
+  "include": [
+    "vite.config.ts",
+    "server/ddgImageSearch.ts",
+    "server/imageSearchPlugin.ts",
+    "server/appBaseRedirectPlugin.ts",
+    "src/lib/appBase.ts"
+  ]
 }
