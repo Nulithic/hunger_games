@@ -857,6 +857,48 @@ textarea:focus {
   border-top: 1px solid rgba(231, 225, 212, 0.12);
 }
 
+.narration-engine {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.narration-engine-value {
+  color: var(--ember-hot);
+  letter-spacing: 0.04em;
+}
+
+.narration-voice {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ash);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+}
+
+.narration-voice-label {
+  text-transform: uppercase;
+}
+
+.narration-voice-select {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(231, 225, 212, 0.22);
+  background: rgba(20, 22, 16, 0.72);
+  color: var(--parchment);
+  font: inherit;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.narration-voice-select:focus-visible {
+  outline: 2px solid rgba(196, 92, 62, 0.75);
+  outline-offset: 2px;
+}
+
 .narration-speed {
   display: grid;
   gap: 0.35rem;

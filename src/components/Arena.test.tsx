@@ -251,6 +251,58 @@ describe('Arena', () => {
     vi.useRealTimers()
   })
 
+  it('shows the active narration engine label', () => {
+    const { backend } = mockNarrationBackend()
+    const narrator = createEventNarrator(backend)
+    const { rerender } = render(
+      <Arena
+        game={baseGame}
+        onAdvance={vi.fn()}
+        onReset={vi.fn()}
+        narrator={narrator}
+        narrationEngine="browser"
+      />,
+    )
+    expect(screen.getByText(/narrator:/i)).toHaveTextContent(/browser/i)
+    expect(screen.queryByLabelText(/narrator voice/i)).not.toBeInTheDocument()
+
+    rerender(
+      <Arena
+        game={baseGame}
+        onAdvance={vi.fn()}
+        onReset={vi.fn()}
+        narrator={narrator}
+        narrationEngine="kokoro"
+      />,
+    )
+    expect(screen.getByText(/narrator:/i)).toHaveTextContent(/kokoro/i)
+    expect(screen.getByLabelText(/narrator voice/i)).toBeInTheDocument()
+  })
+
+  it('lets the user change Kokoro voice when the engine is Kokoro', async () => {
+    const user = userEvent.setup()
+    const onKokoroVoiceChange = vi.fn()
+    const { backend } = mockNarrationBackend()
+    const narrator = createEventNarrator(backend)
+
+    render(
+      <Arena
+        game={baseGame}
+        onAdvance={vi.fn()}
+        onReset={vi.fn()}
+        narrator={narrator}
+        narrationEngine="kokoro"
+        kokoroVoice="af_bella"
+        onKokoroVoiceChange={onKokoroVoiceChange}
+      />,
+    )
+
+    const select = screen.getByLabelText(/narrator voice/i)
+    await user.selectOptions(select, 'bm_george')
+    expect(onKokoroVoiceChange).toHaveBeenCalledWith('bm_george')
+    expect(select).toHaveValue('bm_george')
+  })
+
   it('auto-advances finale beats while narrating the latest section', async () => {
     const user = userEvent.setup()
     const { spoken, handlers, backend } = mockNarrationBackend()

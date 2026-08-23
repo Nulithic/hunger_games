@@ -1,0 +1,20 @@
+# GPU override for NVIDIA (Docker Desktop + WSL2 GPU / Linux NVIDIA Container Toolkit).
+# Usage from repo root:
+#   docker compose -f docker/kokoro/docker-compose.yml -f docker/kokoro/docker-compose.gpu.yml up -d
+#
+# Requires an NVIDIA GPU and working `docker run --rm --gpus all nvidia/cuda:12.3.2-base-ubuntu22.04 nvidia-smi`
+
+services:
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.4
+    environment:
+      - ONNX_NUM_THREADS=4
+      - ONNX_INTER_OP_THREADS=2
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

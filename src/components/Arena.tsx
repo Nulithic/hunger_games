@@ -2,12 +2,33 @@ import { useEffect, useRef, useState } from 'react'
 import { districtAccentStyle, groupTributesByDistrict } from '../lib/districts'
 import { groupEventsByPhase, type EventLogSection } from '../lib/eventLog'
 import {
+  createBrowserNarrationBackend,
   createEventNarrator,
   NARRATION_RATE_DEFAULT,
   NARRATION_RATE_MAX,
   NARRATION_RATE_MIN,
   type EventNarrator,
+  type NarrationBackend,
 } from '../lib/narration'
+import {
+  DEFAULT_KOKORO_VOICE,
+  type KokoroNarrationBackend,
+} from '../lib/kokoroNarration'
+import {
+  fetchKokoroVoiceIds,
+  formatKokoroVoiceLabel,
+  KOKORO_VOICES,
+  mergeKokoroVoiceOptions,
+  readStoredKokoroVoice,
+  writeStoredKokoroVoice,
+  type KokoroVoiceOption,
+} from '../lib/kokoroVoices'
+import {
+  createDelegatingNarrationBackend,
+  defaultKokoroBaseUrl,
+  resolveNarrationBackend,
+  type NarrationEngine,
+} from '../lib/resolveNarrationBackend'
 import {
   advanceActionLabel,
   livingTributes,
@@ -17,19 +38,59 @@ import type { GameState } from '../types'
 import { EventLogLine } from './EventLogLine'
 import { TributeCard } from './TributeCard'
 
+function createNoopBackend(): NarrationBackend {
+  return {
+    cancel: () => {},
+    pause: () => {},
+    resume: () => {},
+    speak: (_text, handlers) => handlers.onerror(),
+  }
+}
+
+function createLiveNarrator(): {
+  narrator: EventNarrator
+  delegate: ReturnType<typeof createDelegatingNarrationBackend>
+} {
+  const browser = createBrowserNarrationBackend() ?? createNoopBackend()
+  const delegate = createDelegatingNarrationBackend(browser)
+  return { narrator: createEventNarrator(delegate), delegate }
+}
+
 type ArenaProps = {
   game: GameState
   onAdvance: () => void
   onReset: () => void
   /** Optional seam for tests. */
   narrator?: EventNarrator
+  /** Optional label seam for tests when `narrator` is injected. */
+  narrationEngine?: NarrationEngine
+  /** Optional voice seams for tests when `narrator` is injected. */
+  kokoroVoice?: string
+  kokoroVoices?: readonly KokoroVoiceOption[]
+  onKokoroVoiceChange?: (voiceId: string) => void
 }
 
-export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
+export function Arena({
+  game,
+  onAdvance,
+  onReset,
+  narrator,
+  narrationEngine,
+  kokoroVoice,
+  kokoroVoices,
+  onKokoroVoiceChange,
+}: ArenaProps) {
   const feedRef = useRef<HTMLDivElement>(null)
   const latestSectionRef = useRef<HTMLDivElement>(null)
   const advanceLockRef = useRef(false)
-  const narratorRef = useRef<EventNarrator>(narrator ?? createEventNarrator())
+  const liveRef = useRef<ReturnType<typeof createLiveNarrator> | null>(null)
+  const kokoroRef = useRef<KokoroNarrationBackend | null>(null)
+  if (!narrator && liveRef.current == null) {
+    liveRef.current = createLiveNarrator()
+  }
+  const narratorRef = useRef<EventNarrator>(
+    narrator ?? liveRef.current!.narrator,
+  )
   const gameRef = useRef(game)
   const onAdvanceRef = useRef(onAdvance)
   /** While true, finishing a spoken line advances the next stepped beat. */
@@ -42,6 +103,17 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   const [playingKey, setPlayingKey] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
   const [narrationRate, setNarrationRate] = useState(NARRATION_RATE_DEFAULT)
+  const [engine, setEngine] = useState<NarrationEngine>(narrationEngine ?? 'browser')
+  const [voiceId, setVoiceId] = useState(
+    () => kokoroVoice ?? readStoredKokoroVoice() ?? DEFAULT_KOKORO_VOICE,
+  )
+  const [voiceOptions, setVoiceOptions] = useState<KokoroVoiceOption[]>(() => {
+    const base = kokoroVoices ? [...kokoroVoices] : [...KOKORO_VOICES]
+    const selected =
+      kokoroVoice ?? readStoredKokoroVoice() ?? DEFAULT_KOKORO_VOICE
+    if (base.some((voice) => voice.id === selected)) return base
+    return mergeKokoroVoiceOptions([...base.map((v) => v.id), selected])
+  })
   const alive = livingTributes(game)
   const fallen = game.tributes.filter((t) => !t.alive)
   const districts = groupTributesByDistrict(game.tributes)
@@ -57,6 +129,18 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
   }, [narrator])
 
   useEffect(() => {
+    if (narrationEngine) setEngine(narrationEngine)
+  }, [narrationEngine])
+
+  useEffect(() => {
+    if (kokoroVoice) setVoiceId(kokoroVoice)
+  }, [kokoroVoice])
+
+  useEffect(() => {
+    if (kokoroVoices) setVoiceOptions([...kokoroVoices])
+  }, [kokoroVoices])
+
+  useEffect(() => {
     const active = narratorRef.current
     // Per-phase buttons opt in; keep the engine ready to speak on click.
     active.setMuted(false)
@@ -67,6 +151,35 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
     }
   }, [])
 
+  // Prefer local Kokoro when healthy; keep browser as the live delegate until then.
+  useEffect(() => {
+    if (narrator) return
+    const delegate = liveRef.current?.delegate
+    if (!delegate) return
+
+    let cancelled = false
+    const initialVoice = readStoredKokoroVoice() ?? DEFAULT_KOKORO_VOICE
+    void resolveNarrationBackend({ voice: initialVoice }).then((resolved) => {
+      if (cancelled) return
+      if (resolved.engine !== 'kokoro' || !resolved.kokoro) return
+      kokoroRef.current = resolved.kokoro
+      delegate.setDelegate(resolved.backend)
+      setVoiceId(resolved.kokoro.getVoice())
+      setEngine('kokoro')
+
+      const baseUrl = defaultKokoroBaseUrl()
+      void fetchKokoroVoiceIds(baseUrl).then((ids) => {
+        if (cancelled) return
+        if (ids.length === 0) return
+        setVoiceOptions(mergeKokoroVoiceOptions(ids))
+      })
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [narrator])
+
   function handleNarrationRateChange(next: number) {
     setNarrationRate(next)
     if (rateTimerRef.current != null) window.clearTimeout(rateTimerRef.current)
@@ -74,6 +187,13 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
       rateTimerRef.current = null
       narratorRef.current.setRate(next)
     }, 120)
+  }
+
+  function handleKokoroVoiceChange(nextVoice: string) {
+    setVoiceId(nextVoice)
+    writeStoredKokoroVoice(nextVoice)
+    kokoroRef.current?.setVoice(nextVoice)
+    onKokoroVoiceChange?.(nextVoice)
   }
 
   function stopBeatAutoplay() {
@@ -320,6 +440,31 @@ export function Arena({ game, onAdvance, onReset, narrator }: ArenaProps) {
               )}
             </div>
             <div className="feed-actions">
+              <p className="narration-engine" aria-live="polite">
+                Narrator:{' '}
+                <span className="narration-engine-value">
+                  {engine === 'kokoro' ? 'Kokoro' : 'Browser'}
+                </span>
+              </p>
+              {engine === 'kokoro' ? (
+                <label className="narration-voice">
+                  <span className="narration-voice-label">Voice</span>
+                  <select
+                    className="narration-voice-select"
+                    value={voiceId}
+                    onChange={(event) => {
+                      handleKokoroVoiceChange(event.target.value)
+                    }}
+                    aria-label="Narrator voice"
+                  >
+                    {voiceOptions.map((voice) => (
+                      <option key={voice.id} value={voice.id}>
+                        {formatKokoroVoiceLabel(voice)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="narration-speed">
                 <span className="narration-speed-label">
                   Speed <span className="narration-speed-value">{narrationRate.toFixed(1)}×</span>

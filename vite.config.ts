@@ -8,10 +8,25 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    proxy: {
+      // Local Kokoro-FastAPI (docker/kokoro) — avoids browser CORS in dev.
+      '/api/kokoro': {
+        target: 'http://127.0.0.1:8880',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/kokoro/, ''),
+      },
+    },
   },
   preview: {
     host: true,
     port: 4173,
+    proxy: {
+      '/api/kokoro': {
+        target: 'http://127.0.0.1:8880',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/kokoro/, ''),
+      },
+    },
   },
   test: {
     environment: 'jsdom',

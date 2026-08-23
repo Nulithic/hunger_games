@@ -23,3 +23,9 @@ npm run dev
 3. Watch day-by-day arena events until one victor remains
 
 Image search uses the Vite/preview server route `/api/image-search` (needs `npm run dev` or `npm run preview`).
+
+## Narration
+
+Arena narration uses the browser speech API by default. For higher-quality local voices, run Kokoro TTS in Docker on your PC (CPU or NVIDIA GPU) — the app probes it automatically, offers a voice picker, and falls back to the browser if it is offline.
+
+See [docs/narration-kokoro.md](docs/narration-kokoro.md).
